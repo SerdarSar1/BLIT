@@ -172,12 +172,25 @@ while loop_variable:
         color = PLAYER2_COLOR if player2.health >= (i+1)*10 else (0,0,100)
         pg.draw.rect(screen, color, (width - (i+1)*seg_width, 0, seg_width-2, bar_height))
 
-    for j in range(special_segments):
-        color = PLAYER1_COLOR if player1.special_attack >= (j+1)*(100/special_segments) else (50,0,50)
-        pg.draw.rect(screen, color, (j*seg_width, bar_height + 5, seg_width-2, bar_height))
-    for j in range(special_segments):
-        color = PLAYER2_COLOR if player2.special_attack >= (j+1)*(100/special_segments) else (50,0,50)
-        pg.draw.rect(screen, color, (width - (j+1)*seg_width, bar_height + 5, seg_width-2, bar_height))
+    special_bar_width = seg_width * special_segments
+    special_bar_height = bar_height
+    bar_x = 0
+    bar_y = bar_height + 5
+
+    pg.draw.rect(screen, (50,0,50), (bar_x, bar_y, special_bar_width, special_bar_height))
+    filled_width = special_bar_width * (player1.special_attack / 100)
+    pg.draw.rect(screen, PLAYER1_COLOR, (bar_x, bar_y, filled_width, special_bar_height))
+    for j in range(1, special_segments):
+        line_x = bar_x + j * seg_width
+        pg.draw.line(screen, PLAYER1_COLOR, (line_x, bar_y), (line_x, bar_y + special_bar_height), 2)
+
+    bar_x = width - special_bar_width
+    pg.draw.rect(screen, (50,0,50), (bar_x, bar_y, special_bar_width, special_bar_height))
+    filled_width = special_bar_width * (player2.special_attack / 100)
+    pg.draw.rect(screen, PLAYER2_COLOR, (bar_x + special_bar_width - filled_width, bar_y, filled_width, special_bar_height))
+    for j in range(1, special_segments):
+        line_x = bar_x + j * seg_width
+        pg.draw.line(screen, PLAYER2_COLOR, (line_x, bar_y), (line_x, bar_y + special_bar_height), 2)
 
 
 
@@ -222,4 +235,4 @@ while loop_variable:
     pg.display.update()
 
 pg.quit()
-#help coding madness too much intresto ideas
+
