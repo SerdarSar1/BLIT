@@ -1,47 +1,89 @@
-# BLIT
-Software Engineering Project
 import pygame as pg
 import random as r
-class Player(pg.sprite.Sprite):
-    def _init_(self):
-        super()._init_()
-        self.image = pg.image.load("").convert_alpha()
-        self.rect = self.image.get_rect(midbottom=(x,y))
-        self.gravity = 0
-    
-    def player_input(self):
-        keys = pg.key.get_pressed()
-        if keys[pg.K_UP] and  self.rect.bottom >= ground
-    
-    def appl_gravity(self):
-        self.gravity += 1
-        self.rect.y += self.gravity
-        if self.rect.bottom >= bottompixel:
-            self.rect.bottom = bottompixel
-        
-
 
 pg.init()
+screen = pg.display.set_mode((800,500))
+clock = pg.time.Clock()
+pg.display.set_caption('Fighter Game')
+
+class Player(pg.sprite.Sprite):
+    def __init__(self, x, y, color, controls):
+        super().__init__()
+
+        self.image = pg.Surface((50, 100))
+        self.image.fill(color)
+
+        self.rect = self.image.get_rect(midbottom=(x, y))
+
+        self.controls = controls
+        self.speed = 300
+        self.gravity = 0
+
+    def handle_input(self, dt):
+        keys = pg.key.get_pressed()
+
+        if keys[self.controls["left"]]:
+            self.rect.x -= self.speed * dt
+        if keys[self.controls["right"]]:
+            self.rect.x += self.speed * dt
+
+        if keys[self.controls["jump"]] and self.rect.bottom >= 400:
+            self.gravity = -20
+
+    def apply_gravity(self):
+        self.gravity += 1
+        self.rect.y += self.gravity
+
+        if self.rect.bottom >= 400:
+            self.rect.bottom = 400
+            self.gravity = 0
+
+    def update(self, dt):
+        self.handle_input(dt)
+        self.apply_gravity()
 
 
+
+player1 = Player(
+    x=200, y=400,
+    color=(255, 0, 0),
+    controls={
+        "left": pg.K_a,
+        "right": pg.K_d,
+        "jump": pg.K_w
+    }
+)
+
+player2 = Player(
+    x=600, y=400,
+    color=(0, 0, 255),
+    controls={
+        "left": pg.K_LEFT,
+        "right": pg.K_RIGHT,
+        "jump": pg.K_UP
+    }
+)
+
+players = pg.sprite.Group(player1, player2)
 
 
 
 loop_variable = True
-screen = pg.display.set_mode((800,468))
-pg.display.set_caption(':D')
-clock = pg.time.Clock()
-
 while loop_variable:
+    dt = clock.tick(60) / 1000
+
     for event in pg.event.get():
         if event.type == pg.QUIT:
             loop_variable = False
 
+    screen.fill((30, 30, 30))
+
+    players.update(dt)
+    players.draw(screen)
+
+    pg.display.update()
+
+pg.quit()
 
 
 
-
-
-
-        pg.display.update()
-        clock.tick(60)
