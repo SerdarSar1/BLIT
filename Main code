@@ -1,0 +1,47 @@
+# BLIT
+Software Engineering Project
+import pygame as pg
+import random as r
+class Player(pg.sprite.Sprite):
+    def _init_(self):
+        super()._init_()
+        self.image = pg.image.load("").convert_alpha()
+        self.rect = self.image.get_rect(midbottom=(x,y))
+        self.gravity = 0
+    
+    def player_input(self):
+        keys = pg.key.get_pressed()
+        if keys[pg.K_UP] and  self.rect.bottom >= ground
+    
+    def appl_gravity(self):
+        self.gravity += 1
+        self.rect.y += self.gravity
+        if self.rect.bottom >= bottompixel:
+            self.rect.bottom = bottompixel
+        
+
+
+pg.init()
+
+
+
+
+
+loop_variable = True
+screen = pg.display.set_mode((800,468))
+pg.display.set_caption(':D')
+clock = pg.time.Clock()
+
+while loop_variable:
+    for event in pg.event.get():
+        if event.type == pg.QUIT:
+            loop_variable = False
+
+
+
+
+
+
+
+        pg.display.update()
+        clock.tick(60)

@@ -1,2 +1,0 @@
-# BLIT
-Software Engineering Project
