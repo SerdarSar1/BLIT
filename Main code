@@ -1,89 +1,225 @@
 import pygame as pg
 import random as r
-
 pg.init()
-screen = pg.display.set_mode((800,500))
+screen = pg.display.set_mode((800, 500), pg.RESIZABLE)
 clock = pg.time.Clock()
 pg.display.set_caption('Fighter Game')
 
-class Player(pg.sprite.Sprite):
-    def __init__(self, x, y, color, controls):
-        super().__init__()
+fullscreen = False
+ko_triggered = False
+ko_y = -200
 
+BG_COLOR = (30, 30, 30)
+PLAYER1_COLOR = (255, 0, 0)
+PLAYER2_COLOR = (0, 0, 255)
+
+class Player(pg.sprite.Sprite):
+    def __init__(self, x_ratio, color, controls):
+        super().__init__()
+        self.color = color
+        self.x_ratio = x_ratio
+        self.width_ratio = 0.06
+        self.height_ratio = 0.2
         self.image = pg.Surface((50, 100))
         self.image.fill(color)
-
-        self.rect = self.image.get_rect(midbottom=(x, y))
-
+        self.rect = self.image.get_rect()
         self.controls = controls
         self.speed = 300
         self.gravity = 0
+        self.attacking = False
+        self.blocking = False
+        self.active_hitbox = None
+        self.hit_opponents = []
+        self.facing = "right"
+        self.health = 100
+        self.max_health = 100
+        self.special_attack = 0
+    def update_rect(self, screen_width, screen_height):
+        w = int(screen_width * self.width_ratio)
+        h = int(screen_height * self.height_ratio)
+        old_midbottom = self.rect.midbottom
+        
+        self.image = pg.Surface((w,h))
+        self.image.fill(self.color)
+        self.rect = self.image.get_rect(midbottom=old_midbottom)
 
-    def handle_input(self, dt):
+        if self.rect.left < 0:
+            self.rect.left = 0
+        if self.rect.right > screen_width:
+            self.rect.right = screen_width
+
+    def handle_input(self,dt,screen_height):
+        if ko_triggered:
+            return
         keys = pg.key.get_pressed()
+        floor = 0.8 * screen_height
 
         if keys[self.controls["left"]]:
             self.rect.x -= self.speed * dt
+            self.facing = "left"
         if keys[self.controls["right"]]:
             self.rect.x += self.speed * dt
+            self.facing = "right"
+        if keys[self.controls["jump"]] and self.rect.bottom >= floor - 5:
+            self.gravity = -18
 
-        if keys[self.controls["jump"]] and self.rect.bottom >= 400:
-            self.gravity = -20
+        self.blocking = keys[self.controls["block"]]
+        if keys[self.controls["attack"]]:
+            if not self.attacking:
+                self.start_attack()
 
-    def apply_gravity(self):
+    def apply_gravity(self, screen_height):
+        floor = 0.8 * screen_height
         self.gravity += 1
         self.rect.y += self.gravity
-
-        if self.rect.bottom >= 400:
-            self.rect.bottom = 400
+        if self.rect.bottom >= floor:
+            self.rect.bottom = floor
             self.gravity = 0
 
-    def update(self, dt):
-        self.handle_input(dt)
-        self.apply_gravity()
+    def start_attack(self):
+        self.attacking = True
+        self.attack_timer = 0.2 
+        w, h = self.rect.width, self.rect.height
+        if self.facing == "right":
+            self.active_hitbox = pg.Rect(self.rect.right, self.rect.top + 0.2*h, 0.3*w, 0.6*h)
+        else:
+            self.active_hitbox = pg.Rect(self.rect.left - 0.3*w, self.rect.top + 0.2*h, 0.3*w, 0.6*h)
+        self.hit_opponents = []
+
+    def update_attack(self, dt):
+        if self.attacking:
+            self.attack_timer -= dt
+            if self.attack_timer <= 0:
+                self.attacking = False
+                self.active_hitbox = None
+                self.hit_opponents = []
+    
+    def deal_damage(self, amount):
+        self.health -= amount
+        if self.health < 0:
+            self.health = 0
+
+    def update(self, dt, screen_width, screen_height):
+        self.update_rect(screen_width, screen_height)
+        self.handle_input(dt, screen_height)
+        self.apply_gravity(screen_height)
+        self.update_attack(dt)
 
 
-
-player1 = Player(
-    x=200, y=400,
-    color=(255, 0, 0),
-    controls={
-        "left": pg.K_a,
-        "right": pg.K_d,
-        "jump": pg.K_w
-    }
-)
-
-player2 = Player(
-    x=600, y=400,
-    color=(0, 0, 255),
-    controls={
-        "left": pg.K_LEFT,
-        "right": pg.K_RIGHT,
-        "jump": pg.K_UP
-    }
-)
-
+player1 = Player(0.1, PLAYER1_COLOR, {"left": pg.K_a, 
+                                      "right": pg.K_d, 
+                                      "jump": pg.K_w,
+                                      "attack": pg.K_e, 
+                                      "special": pg.K_r, 
+                                      "block": pg.K_t})
+player2 = Player(0.9, PLAYER2_COLOR, {"left": pg.K_LEFT,
+                                       "right": pg.K_RIGHT, 
+                                       "jump": pg.K_UP,
+                                       "attack": pg.K_KP1,
+                                       "special": pg.K_KP2,
+                                       "block": pg.K_KP3})
 players = pg.sprite.Group(player1, player2)
-
 
 
 loop_variable = True
 while loop_variable:
     dt = clock.tick(60) / 1000
+    width, height = screen.get_size()
 
     for event in pg.event.get():
         if event.type == pg.QUIT:
             loop_variable = False
+        if event.type == pg.KEYDOWN:
+            if event.key == pg.K_f:
+                fullscreen = not fullscreen
+                if fullscreen:
+                    screen = pg.display.set_mode((0, 0), pg.FULLSCREEN)
+                else:
+                    screen = pg.display.set_mode((800, 500), pg.RESIZABLE)
+            if event.key == pg.K_ESCAPE:
+                loop_variable = False
 
-    screen.fill((30, 30, 30))
+    screen.fill(BG_COLOR)
 
-    players.update(dt)
+    if not ko_triggered:
+        players.update(dt, width, height)
+
+    if player1.active_hitbox and player2 not in player1.hit_opponents and player1.active_hitbox.colliderect(player2.rect):
+        if not player2.blocking:
+            player2.deal_damage(5)
+        player1.hit_opponents.append(player2)
+
+    if player2.active_hitbox and player1 not in player2.hit_opponents and player2.active_hitbox.colliderect(player1.rect):
+        if not player1.blocking:
+            player1.deal_damage(5)
+        player2.hit_opponents.append(player1)
+
     players.draw(screen)
+
+    if player1.active_hitbox:
+        pg.draw.rect(screen, PLAYER1_COLOR, player1.active_hitbox)
+    if player2.active_hitbox:
+        pg.draw.rect(screen, PLAYER2_COLOR, player2.active_hitbox)
+
+    bar_height = 0.05 * height
+    segments = 10
+    special_segments = 3
+    seg_width = width * 0.03
+    for i in range(segments):
+        color = PLAYER1_COLOR if player1.health >= (i+1)*10 else (100,0,0)
+        pg.draw.rect(screen, color, (i*seg_width, 0, seg_width-2, bar_height))
+    for i in range(segments):
+        color = PLAYER2_COLOR if player2.health >= (i+1)*10 else (0,0,100)
+        pg.draw.rect(screen, color, (width - (i+1)*seg_width, 0, seg_width-2, bar_height))
+
+    for j in range(special_segments):
+        color = PLAYER1_COLOR if player1.special_attack >= (j+1)*(100/special_segments) else (50,0,50)
+        pg.draw.rect(screen, color, (j*seg_width, bar_height + 5, seg_width-2, bar_height))
+    for j in range(special_segments):
+        color = PLAYER2_COLOR if player2.special_attack >= (j+1)*(100/special_segments) else (50,0,50)
+        pg.draw.rect(screen, color, (width - (j+1)*seg_width, bar_height + 5, seg_width-2, bar_height))
+
+
+
+    if not ko_triggered and (player1.health <= 0 or player2.health <= 0):
+        ko_triggered = True
+        ko_y = -0.4 * height
+
+    if ko_triggered:
+        ko_y += 600 * dt
+    if ko_y > 0.3 * height:
+        ko_y = 0.3 * height
+
+    try:
+        ko_font = pg.font.Font("ARCADECLASSIC.ttf", int(0.25*height))
+    except:
+        ko_font = pg.font.SysFont("Arial", int(0.25*height), bold=True)
+
+    winner_font = pg.font.SysFont("Arial", int(0.12*height), bold=True)
+
+    ko_text_str = "KO"
+    main_color = (255, 255, 255) 
+    outline_color =  (20,20,20)
+
+    for _ in range(30):
+        offset_x = r.randint(-30,30)
+        offset_y = r.randint(-10,10)
+        splatter = ko_font.render(ko_text_str, True, (25,20,20))
+        splatter_rect = splatter.get_rect(center=(width//2 + offset_x, int(ko_y) + offset_y))
+        screen.blit(splatter, splatter_rect)
+
+    ko_text = ko_font.render(ko_text_str, True, main_color)
+    ko_rect = ko_text.get_rect(center=(width//2, int(ko_y)))
+    screen.blit(ko_text, ko_rect)
+
+    winner_text_str = "WINNER PLAYER 2" if player1.health <= 0 else "WINNER PLAYER 1"
+    winner_color = PLAYER2_COLOR if player1.health <= 0 else PLAYER1_COLOR
+    winner_text = winner_font.render(winner_text_str, True, winner_color)
+    winner_rect = winner_text.get_rect(center=(width//2, int(ko_y + 0.15*height)))
+    screen.blit(winner_text, winner_rect)
+
 
     pg.display.update()
 
 pg.quit()
-
-
-
+#help coding madness too much intresto ideas
