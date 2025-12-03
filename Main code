@@ -515,7 +515,7 @@ while loop_variable:
         replay_rect = pg.Rect(button_x, button_y, button_width, button_height)
         pg.draw.rect(screen, (200, 200, 200), replay_rect, border_radius=10)
         font = pg.font.SysFont("Arial", int(0.07 * height), bold=True)
-        text = font.render("REPLAY", True, (0, 0, 0))
+        text = font.render("REPLAY", True, (255,255,255))
         text_rect = text.get_rect(center=replay_rect.center)
         screen.blit(text, text_rect)
         
