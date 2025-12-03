@@ -1,7 +1,11 @@
 import pygame as pg
 import random as r
+import math
+
 pg.init()
-screen = pg.display.set_mode((800, 500), pg.RESIZABLE)
+# Use a default size for initial screen creation
+initial_width, initial_height = 800, 500
+screen = pg.display.set_mode((initial_width, initial_height), pg.RESIZABLE)
 clock = pg.time.Clock()
 pg.display.set_caption('Fighter Game')
 
@@ -12,7 +16,44 @@ ko_y = -200
 BG_COLOR = (30, 30, 30)
 PLAYER1_COLOR = (255, 0, 0)
 PLAYER2_COLOR = (0, 0, 255)
+FIREBALL_COLOR = (255, 165, 0) # Orange/Yellow
+# Semi-transparent blue for the shield (RGBA: 50, 50, 255, 150)
+BLOCK_SHIELD_COLOR = (50, 50, 255, 150) 
 
+# --- Global Groups ---
+all_sprites = pg.sprite.Group()
+fireballs = pg.sprite.Group()
+
+
+fireball_image = pg.image.load("C:/Users/saira/OneDrive/Desktop/Python projects/Fighter game/wmremove-transformed.png").convert_alpha()
+
+class Fireball(pg.sprite.Sprite):
+    def __init__(self, start_x, start_y, direction, color, screen_width):
+        super().__init__()
+        self.direction = direction  # "left" or "right"
+        self.speed = 500
+        self.damage = 25
+        self.screen_width = screen_width
+        self.owner = None
+
+        # Use the loaded image and scale it
+        self.original_image = fireball_image
+        self.image = pg.transform.scale(self.original_image, (30, 30))  # scale as needed
+        if self.direction == "left":
+            self.image = pg.transform.flip(self.image, True, False)
+        self.rect = self.image.get_rect(center=(start_x, start_y))
+
+    def update(self, dt, *args): # dt is the only argument used for movement
+        if self.direction == "right":
+            self.rect.x += self.speed * dt
+        else:
+            self.rect.x -= self.speed * dt
+        
+        # Remove fireball if it goes off screen
+        if self.rect.right < 0 or self.rect.left > self.screen_width:
+            self.kill()
+
+# --- Player Class ---
 class Player(pg.sprite.Sprite):
     def __init__(self, x_ratio, color, controls):
         super().__init__()
@@ -20,9 +61,12 @@ class Player(pg.sprite.Sprite):
         self.x_ratio = x_ratio
         self.width_ratio = 0.06
         self.height_ratio = 0.2
+        
+        # Player attributes
+        # Initial dummy surface/rect to exist before first screen update
         self.image = pg.Surface((50, 100))
         self.image.fill(color)
-        self.rect = self.image.get_rect()
+        self.rect = self.image.get_rect() 
         self.controls = controls
         self.speed = 300
         self.gravity = 0
@@ -30,47 +74,126 @@ class Player(pg.sprite.Sprite):
         self.blocking = False
         self.active_hitbox = None
         self.hit_opponents = []
-        self.facing = "right"
+        self.facing = "right" if x_ratio < 0.5 else "left" # Face each other initially
         self.health = 100
         self.max_health = 100
         self.special_attack = 0
-    def update_rect(self, screen_width, screen_height):
+        self.max_special = 300 # Max special is 3 bars (3 x 100)
+        self.special_cost = 100 # Cost to use one shot
+        self.can_special = True 
+        self.special_cooldown_timer = 0
+        self.special_cooldown_time = 0.5 
+
+        # Blocking Stamina Attributes
+        self.block_stamina = 100
+        self.max_block_stamina = 100
+        self.block_drain_rate = 50 # Stamina drained per second while blocking
+        self.block_recover_rate = 30 # Stamina recovered per second when not blocking
+        
+    def initial_setup(self, screen_width, screen_height):
+        """Sets the player's initial position based on screen size."""
+        # Calculate size based on screen dimensions
         w = int(screen_width * self.width_ratio)
         h = int(screen_height * self.height_ratio)
+        floor = 0.8 * screen_height
+        
+        # Update image/rect size
+        self.image = pg.Surface((w,h))
+        self.image.fill(self.color)
+        
+        # Set initial position (midbottom based on screen ratio)
+        self.rect = self.image.get_rect(midbottom=(int(screen_width * self.x_ratio), floor))
+
+    def update_rect(self, screen_width, screen_height):
+        """Resizes player sprite and clamps position to screen edges."""
+        w = int(screen_width * self.width_ratio)
+        h = int(screen_height * self.height_ratio)
+        floor = 0.8 * screen_height
+        
+        # Store current position before resizing
         old_midbottom = self.rect.midbottom
         
+        # Update image/rect size
         self.image = pg.Surface((w,h))
         self.image.fill(self.color)
         self.rect = self.image.get_rect(midbottom=old_midbottom)
 
+        # Clamping to floor
+        if self.rect.bottom > floor:
+            self.rect.bottom = floor
+        
+        # Clamping to screen edges
         if self.rect.left < 0:
             self.rect.left = 0
         if self.rect.right > screen_width:
             self.rect.right = screen_width
-
-    def handle_input(self,dt,screen_height):
+        
+    def handle_input(self, dt, screen_height, screen_width):
         if ko_triggered:
             return
         keys = pg.key.get_pressed()
         floor = 0.8 * screen_height
-
+        
+        # Movement
         if keys[self.controls["left"]]:
             self.rect.x -= self.speed * dt
             self.facing = "left"
         if keys[self.controls["right"]]:
             self.rect.x += self.speed * dt
             self.facing = "right"
+            
+        # JUMP FIX: Calculate jump velocity based on screen height
+        # An initial velocity of -18 worked well for height=500. 
+        # -18 / 500 = -0.036
+        JUMP_VELOCITY_RATIO = -0.036 
+        JUMP_VELOCITY = screen_height * JUMP_VELOCITY_RATIO
+        
         if keys[self.controls["jump"]] and self.rect.bottom >= floor - 5:
-            self.gravity = -18
+            # Scale gravity for consistent jump height relative to screen height
+            self.gravity = JUMP_VELOCITY # Use scaled velocity here
 
-        self.blocking = keys[self.controls["block"]]
+        # Blocking Logic
+        if keys[self.controls["block"]]:
+            # Can only block if stamina is above zero
+            if self.block_stamina > 0:
+                self.blocking = True
+            else:
+                self.blocking = False # Cannot block if stamina is zero
+        else:
+            self.blocking = False
+        
+        # Stamina Management
+        if self.blocking:
+            # Drain stamina
+            self.block_stamina -= self.block_drain_rate * dt
+            if self.block_stamina < 0:
+                self.block_stamina = 0
+                self.blocking = False # Forced release if stamina hits zero
+        else:
+            # Recover stamina
+            self.block_stamina += self.block_recover_rate * dt
+            if self.block_stamina > self.max_block_stamina:
+                self.block_stamina = self.max_block_stamina
+        
+        # Basic Attack
         if keys[self.controls["attack"]]:
-            if not self.attacking:
+            if not self.attacking and not self.blocking:
                 self.start_attack()
+        
+        # Special Attack (Fireball)
+        if keys[self.controls["special"]] and self.special_attack >= self.special_cost and self.can_special and not self.attacking and not self.blocking:
+            self.start_special(screen_width)
 
     def apply_gravity(self, screen_height):
         floor = 0.8 * screen_height
-        self.gravity += 1
+        
+        # GRAVITY FIX: Scale gravity acceleration based on screen height
+        # An acceleration of +1 worked well for height=500. 
+        # 1 / 500 = 0.002
+        GRAVITY_ACCELERATION_RATIO = 0.002
+        GRAVITY_ACCELERATION = screen_height * GRAVITY_ACCELERATION_RATIO
+        
+        self.gravity += GRAVITY_ACCELERATION # Use scaled acceleration here
         self.rect.y += self.gravity
         if self.rect.bottom >= floor:
             self.rect.bottom = floor
@@ -80,49 +203,171 @@ class Player(pg.sprite.Sprite):
         self.attacking = True
         self.attack_timer = 0.2 
         w, h = self.rect.width, self.rect.height
+        
         if self.facing == "right":
             self.active_hitbox = pg.Rect(self.rect.right, self.rect.top + 0.2*h, 0.3*w, 0.6*h)
         else:
             self.active_hitbox = pg.Rect(self.rect.left - 0.3*w, self.rect.top + 0.2*h, 0.3*w, 0.6*h)
         self.hit_opponents = []
+        
+    def start_special(self, screen_width):
+        self.special_attack -= self.special_cost
+        self.can_special = False
+        self.special_cooldown_timer = self.special_cooldown_time
+        
+        # Spawn Fireball
+        start_x = self.rect.centerx
+        start_y = self.rect.centery - 10 # Launch slightly above center
+        fireball = Fireball(start_x, start_y, self.facing, FIREBALL_COLOR, screen_width)
+        fireball.owner = self # Set the owner to prevent self-damage
+        all_sprites.add(fireball)
+        fireballs.add(fireball)
 
     def update_attack(self, dt):
+        # Basic Attack Timer
         if self.attacking:
             self.attack_timer -= dt
             if self.attack_timer <= 0:
                 self.attacking = False
                 self.active_hitbox = None
                 self.hit_opponents = []
+        
+        # Special Cooldown Timer
+        if not self.can_special:
+            self.special_cooldown_timer -= dt
+            if self.special_cooldown_timer <= 0:
+                self.can_special = True
     
+    def gain_special(self, amount):
+        self.special_attack += amount
+        if self.special_attack > self.max_special:
+            self.special_attack = self.max_special
+
     def deal_damage(self, amount):
         self.health -= amount
         if self.health < 0:
             self.health = 0
+        # Gain special meter when hit
+        self.gain_special(amount * 0.5) 
 
     def update(self, dt, screen_width, screen_height):
+        """Sprite update method called by sprite group."""
         self.update_rect(screen_width, screen_height)
-        self.handle_input(dt, screen_height)
+        self.handle_input(dt, screen_height, screen_width)
         self.apply_gravity(screen_height)
         self.update_attack(dt)
 
-
-player1 = Player(0.1, PLAYER1_COLOR, {"left": pg.K_a, 
+# --- Game Setup ---
+player1 = Player(0.2, PLAYER1_COLOR, {"left": pg.K_a, 
                                       "right": pg.K_d, 
                                       "jump": pg.K_w,
                                       "attack": pg.K_e, 
                                       "special": pg.K_r, 
                                       "block": pg.K_t})
-player2 = Player(0.9, PLAYER2_COLOR, {"left": pg.K_LEFT,
-                                       "right": pg.K_RIGHT, 
-                                       "jump": pg.K_UP,
-                                       "attack": pg.K_KP1,
-                                       "special": pg.K_KP2,
-                                       "block": pg.K_KP3})
+player2 = Player(0.8, PLAYER2_COLOR, {"left": pg.K_LEFT,
+                                      "right": pg.K_RIGHT, 
+                                      "jump": pg.K_UP,
+                                      "attack": pg.K_KP1,
+                                      "special": pg.K_KP2,
+                                      "block": pg.K_KP3})
+
+# Initial positioning based on initial screen size
+player1.initial_setup(initial_width, initial_height)
+player2.initial_setup(initial_width, initial_height)
+
 players = pg.sprite.Group(player1, player2)
+all_sprites.add(player1, player2)
 
 
+# Function to Draw Block Shield (NOW AN ELLIPSE)
+def draw_block_shield(surface, player):
+    """Draws a semi-transparent elliptical force field around the player if they are blocking."""
+    if player.blocking:
+        w, h = player.rect.width, player.rect.height
+        
+        # Define the size of the shield surface (e.g., 110% wider, 30% taller than the player)
+        shield_w = int(w * 2.1)
+        shield_h = int(h * 1.3)
+        
+        # Create a surface with per-pixel alpha for transparency
+        shield_surface = pg.Surface((shield_w, shield_h), pg.SRCALPHA)
+        
+        # Define the rect for the ellipse, which will fill the shield_surface
+        ellipse_rect = shield_surface.get_rect()
+        
+        # Draw the filled ellipse onto the transparent surface
+        pg.draw.ellipse(shield_surface, BLOCK_SHIELD_COLOR, ellipse_rect)
+        
+        # Calculate the position to blit the shield surface, centered on the player
+        shield_rect = shield_surface.get_rect(center=player.rect.center)
+        
+        surface.blit(shield_surface, shield_rect)
+
+# Function to Draw all Bars
+def draw_bars(surface, width, height, player1, player2):
+    bar_height = 0.05 * height
+    segments = 10
+    special_segments = 3 
+    seg_width = width * 0.03
+    
+    # 1. Health Bars
+    for i in range(segments):
+        # P1 Health
+        color = PLAYER1_COLOR if player1.health >= (i+1)*10 else (100,0,0)
+        pg.draw.rect(surface, color, (i*seg_width, 0, seg_width-2, bar_height))
+        # P2 Health
+        color = PLAYER2_COLOR if player2.health >= (i+1)*10 else (0,0,100)
+        pg.draw.rect(surface, color, (width - (i+1)*seg_width, 0, seg_width-2, bar_height))
+
+    # 2. Special Bars
+    special_bar_width = seg_width * special_segments
+    bar_y_special = bar_height + 5
+
+    # P1 Special Meter
+    bar_x = 0
+    pg.draw.rect(surface, (50,0,50), (bar_x, bar_y_special, special_bar_width, bar_height)) 
+    filled_width = special_bar_width * (player1.special_attack / player1.max_special) 
+    pg.draw.rect(surface, PLAYER1_COLOR, (bar_x, bar_y_special, filled_width, bar_height))
+    # Draw separation lines for the 3 shots
+    for j in range(1, special_segments): 
+        line_x = bar_x + j * seg_width
+        pg.draw.line(surface, (255, 255, 255), (line_x, bar_y_special), (line_x, bar_y_special + bar_height), 2)
+
+    # P2 Special Meter
+    bar_x = width - special_bar_width
+    pg.draw.rect(surface, (50,0,50), (bar_x, bar_y_special, special_bar_width, bar_height)) 
+    filled_width = special_bar_width * (player2.special_attack / player2.max_special) 
+    # Draw from right to left
+    pg.draw.rect(surface, PLAYER2_COLOR, (bar_x + special_bar_width - filled_width, bar_y_special, filled_width, bar_height)) 
+    # Draw separation lines for the 3 shots
+    for j in range(1, special_segments): 
+        line_x = bar_x + j * seg_width
+        pg.draw.line(surface, (255, 255, 255), (line_x, bar_y_special), (line_x, bar_y_special + bar_height), 2)
+
+    # 3. Block Stamina Bars
+    block_bar_width = seg_width * 3 # Block bar size is 3 segments wide
+    bar_y_block = bar_y_special + bar_height + 5
+    block_color = (0, 200, 255) # Bright blue for the bar
+    block_bar_height = bar_height / 2
+
+    # P1 Block Stamina
+    bar_x = 0
+    pg.draw.rect(surface, (20, 20, 70), (bar_x, bar_y_block, block_bar_width, block_bar_height))
+    filled_width = block_bar_width * (player1.block_stamina / player1.max_block_stamina)
+    pg.draw.rect(surface, block_color, (bar_x, bar_y_block, filled_width, block_bar_height))
+
+    # P2 Block Stamina
+    bar_x = width - block_bar_width
+    pg.draw.rect(surface, (20, 20, 70), (bar_x, bar_y_block, block_bar_width, block_bar_height))
+    filled_width = block_bar_width * (player2.block_stamina / player2.max_block_stamina)
+    # Draw from right to left
+    pg.draw.rect(surface, block_color, (bar_x + block_bar_width - filled_width, bar_y_block, filled_width, block_bar_height))
+
+
+# --- Main Loop ---
 loop_variable = True
 while loop_variable:
+    # dt (delta time) is crucial for frame-rate independent movement
     dt = clock.tick(60) / 1000
     width, height = screen.get_size()
 
@@ -138,62 +383,79 @@ while loop_variable:
                     screen = pg.display.set_mode((800, 500), pg.RESIZABLE)
             if event.key == pg.K_ESCAPE:
                 loop_variable = False
+        if event.type == pg.VIDEORESIZE:
+            # Re-call update_rect on resize to ensure players scale/position correctly
+            player1.update_rect(width, height)
+            player2.update_rect(width, height)
+
 
     screen.fill(BG_COLOR)
-
+    def handle_attack(attacker, defender, damage):
+        """Handles regular attack collision and special gains."""
+        if attacker.active_hitbox and defender not in attacker.hit_opponents and attacker.active_hitbox.colliderect(defender.rect):
+            if not defender.blocking:
+                defender.deal_damage(damage)
+            # Both players gain special
+            attacker.gain_special(damage * 1.5)  # attacker
+            defender.gain_special(damage * 0.5)  # defender
+            attacker.hit_opponents.append(defender)
+    
     if not ko_triggered:
-        players.update(dt, width, height)
+        # Update players (handles input, gravity, attack timers, and BLOCK STAMINA)
+        # Passes dt, width, and height to the Player.update method
+        players.update(dt, width, height) 
+        # Update fireballs (handles movement)
+        fireballs.update(dt) 
 
-    if player1.active_hitbox and player2 not in player1.hit_opponents and player1.active_hitbox.colliderect(player2.rect):
-        if not player2.blocking:
-            player2.deal_damage(5)
-        player1.hit_opponents.append(player2)
+        # Players gain special meter passively
+        player1.gain_special(10 * dt)
+        player2.gain_special(10 * dt)
 
-    if player2.active_hitbox and player1 not in player2.hit_opponents and player2.active_hitbox.colliderect(player1.rect):
-        if not player1.blocking:
-            player1.deal_damage(5)
-        player2.hit_opponents.append(player1)
+        # --- Collision Logic ---
+        
+        # Basic Attack vs Player
+        handle_attack(player1, player2, 5)
+        handle_attack(player2, player1, 5)
 
-    players.draw(screen)
+        # Fireball collisions
+        for fireball in fireballs:
+            if fireball.owner != player1 and fireball.rect.colliderect(player1.rect):
+                if not player1.blocking:
+                    player1.deal_damage(fireball.damage)
+                # Both attacker and defender gain special
+                fireball.owner.gain_special(fireball.damage * 1.5)
+                player1.gain_special(fireball.damage * 0.5)
+                fireball.kill()
 
+            elif fireball.owner != player2 and fireball.rect.colliderect(player2.rect):
+                if not player2.blocking:
+                    player2.deal_damage(fireball.damage)
+                # Both attacker and defender gain special
+                fireball.owner.gain_special(fireball.damage * 1.5)
+                player2.gain_special(fireball.damage * 0.5)
+                fireball.kill()
+
+
+    # --- Drawing ---
+    
+    # Draw players and active fireballs
+    all_sprites.draw(screen) 
+
+    # Draw the Block Shield for both players (NOW AN ELLIPSE)
+    draw_block_shield(screen, player1)
+    draw_block_shield(screen, player2)
+
+    # Draw basic attack hitboxes (for debug/visual feedback)
     if player1.active_hitbox:
-        pg.draw.rect(screen, PLAYER1_COLOR, player1.active_hitbox)
+        pg.draw.rect(screen, PLAYER1_COLOR, player1.active_hitbox, 2)
     if player2.active_hitbox:
-        pg.draw.rect(screen, PLAYER2_COLOR, player2.active_hitbox)
+        pg.draw.rect(screen, PLAYER2_COLOR, player2.active_hitbox, 2)
 
-    bar_height = 0.05 * height
-    segments = 10
-    special_segments = 3
-    seg_width = width * 0.03
-    for i in range(segments):
-        color = PLAYER1_COLOR if player1.health >= (i+1)*10 else (100,0,0)
-        pg.draw.rect(screen, color, (i*seg_width, 0, seg_width-2, bar_height))
-    for i in range(segments):
-        color = PLAYER2_COLOR if player2.health >= (i+1)*10 else (0,0,100)
-        pg.draw.rect(screen, color, (width - (i+1)*seg_width, 0, seg_width-2, bar_height))
-
-    special_bar_width = seg_width * special_segments
-    special_bar_height = bar_height
-    bar_x = 0
-    bar_y = bar_height + 5
-
-    pg.draw.rect(screen, (50,0,50), (bar_x, bar_y, special_bar_width, special_bar_height))
-    filled_width = special_bar_width * (player1.special_attack / 100)
-    pg.draw.rect(screen, PLAYER1_COLOR, (bar_x, bar_y, filled_width, special_bar_height))
-    for j in range(1, special_segments):
-        line_x = bar_x + j * seg_width
-        pg.draw.line(screen, PLAYER1_COLOR, (line_x, bar_y), (line_x, bar_y + special_bar_height), 2)
-
-    bar_x = width - special_bar_width
-    pg.draw.rect(screen, (50,0,50), (bar_x, bar_y, special_bar_width, special_bar_height))
-    filled_width = special_bar_width * (player2.special_attack / 100)
-    pg.draw.rect(screen, PLAYER2_COLOR, (bar_x + special_bar_width - filled_width, bar_y, filled_width, special_bar_height))
-    for j in range(1, special_segments):
-        line_x = bar_x + j * seg_width
-        pg.draw.line(screen, PLAYER2_COLOR, (line_x, bar_y), (line_x, bar_y + special_bar_height), 2)
+    # Draw all status bars (Health, Special, Block Stamina)
+    draw_bars(screen, width, height, player1, player2)
 
 
-
+    # --- KO Animation ---
     if not ko_triggered and (player1.health <= 0 or player2.health <= 0):
         ko_triggered = True
         ko_y = -0.4 * height
@@ -203,34 +465,38 @@ while loop_variable:
     if ko_y > 0.3 * height:
         ko_y = 0.3 * height
 
-    try:
-        ko_font = pg.font.Font("ARCADECLASSIC.ttf", int(0.25*height))
-    except:
-        ko_font = pg.font.SysFont("Arial", int(0.25*height), bold=True)
+    if ko_triggered:
+        try:
+            # You need the font file 'ARCADECLASSIC.ttf' or it will raise an error
+            ko_font = pg.font.Font("ARCADECLASSIC.ttf", int(0.25*height))
+        except:
+            # Fallback to system font if custom font is not found
+            ko_font = pg.font.SysFont("Arial", int(0.25*height), bold=True)
 
-    winner_font = pg.font.SysFont("Arial", int(0.12*height), bold=True)
+        winner_font = pg.font.SysFont("Arial", int(0.12*height), bold=True)
 
-    ko_text_str = "KO"
-    main_color = (255, 255, 255) 
-    outline_color =  (20,20,20)
+        ko_text_str = "KO"
+        main_color = (255, 255, 255) 
+        
+        # Draw background splatter for effect
+        for _ in range(15):
+            offset_x = r.randint(-15,15)
+            offset_y = r.randint(-5,5)
+            splatter = ko_font.render(ko_text_str, True, (230,230,230))
+            splatter_rect = splatter.get_rect(center=(width//2 + offset_x, int(ko_y) + offset_y))
+            screen.blit(splatter, splatter_rect)
 
-    for _ in range(30):
-        offset_x = r.randint(-30,30)
-        offset_y = r.randint(-10,10)
-        splatter = ko_font.render(ko_text_str, True, (25,20,20))
-        splatter_rect = splatter.get_rect(center=(width//2 + offset_x, int(ko_y) + offset_y))
-        screen.blit(splatter, splatter_rect)
+        # Draw main KO text
+        ko_text = ko_font.render(ko_text_str, True, main_color)
+        ko_rect = ko_text.get_rect(center=(width//2, int(ko_y)))
+        screen.blit(ko_text, ko_rect)
 
-    ko_text = ko_font.render(ko_text_str, True, main_color)
-    ko_rect = ko_text.get_rect(center=(width//2, int(ko_y)))
-    screen.blit(ko_text, ko_rect)
-
-    winner_text_str = "WINNER PLAYER 2" if player1.health <= 0 else "WINNER PLAYER 1"
-    winner_color = PLAYER2_COLOR if player1.health <= 0 else PLAYER1_COLOR
-    winner_text = winner_font.render(winner_text_str, True, winner_color)
-    winner_rect = winner_text.get_rect(center=(width//2, int(ko_y + 0.15*height)))
-    screen.blit(winner_text, winner_rect)
-
+        # Draw Winner text
+        winner_text_str = "WINNER PLAYER 2" if player1.health <= 0 else "WINNER PLAYER 1"
+        winner_color = PLAYER2_COLOR if player1.health <= 0 else PLAYER1_COLOR
+        winner_text = winner_font.render(winner_text_str, True, winner_color)
+        winner_rect = winner_text.get_rect(center=(width//2, int(ko_y + 0.15*height)))
+        screen.blit(winner_text, winner_rect)
 
     pg.display.update()
 
