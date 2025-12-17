@@ -22,8 +22,10 @@ BLOCK_SHIELD_COLOR = (50, 50, 255, 150)
 all_sprites = pg.sprite.Group()
 fireballs = pg.sprite.Group()
 
+music = pg.mixer.music.load(r"C:\Users\20saris\OneDrive - Tudor Grange Academies Trust\Programming\2025-09-16_-_Mr_Wick_-_David_Fesliyan_-_www.fesliyanstudios.com-DRUMS-AND-BASS-ONLY.mp3")
 
-fireball_image = pg.image.load("C:/Users/saira/OneDrive/Desktop/Python projects/Fighter game/wmremove-transformed.png").convert_alpha()
+fireball_image = pg.image.load(r"C:\Users\20saris\OneDrive - Tudor Grange Academies Trust\Programming\fireball.png").convert_alpha()
+
 
 class Fireball(pg.sprite.Sprite):
     def __init__(self, start_x, start_y, direction, color, screen_width):
@@ -193,6 +195,8 @@ class Player(pg.sprite.Sprite):
             self.active_hitbox = pg.Rect(self.rect.right, self.rect.top + 0.2*h, 0.3*w, 0.6*h)
         else:
             self.active_hitbox = pg.Rect(self.rect.left - 0.3*w, self.rect.top + 0.2*h, 0.3*w, 0.6*h)
+        
+        
         self.hit_opponents = []
         
     def start_special(self, screen_width):
@@ -375,6 +379,7 @@ def draw_bars(surface, width, height, player1, player2):
 
 # --- Main Loop ---
 loop_variable = True
+pg.mixer.music.play()
 while loop_variable:
     # dt (delta time) is crucial for frame-rate independent movement and optimalisng the game
     dt = clock.tick(60) / 1000
@@ -395,6 +400,10 @@ while loop_variable:
         if event.type == pg.VIDEORESIZE:    
             player1.update_rect(width, height)
             player2.update_rect(width, height)
+            #ai made changes under here
+        if ko_triggered and event.type == pg.MOUSEBUTTONDOWN:
+            if replay_rect.collidepoint(event.pos):
+                reset_game()
     
     
     screen.fill(BG_COLOR)
@@ -518,10 +527,6 @@ while loop_variable:
         text = font.render("REPLAY", True, (255,255,255))
         text_rect = text.get_rect(center=replay_rect.center)
         screen.blit(text, text_rect)
-        
-        if ko_triggered and event.type == pg.MOUSEBUTTONDOWN:
-            if replay_rect.collidepoint(event.pos):
-                reset_game()
     
 
     pg.display.update()
