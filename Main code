@@ -82,13 +82,31 @@ class Player(pg.sprite.Sprite):
         self.can_special = True 
         self.special_cooldown_timer = 0
         self.special_cooldown_time = 0.5 
+        
+        self.combo = 0
+        self.start_combo = False
 
         # Blocking Stamina Attributes
         self.block_stamina = 100
         self.max_block_stamina = 100
         self.block_drain_rate = 100 # Stamina drained per second while blocking
         self.block_recover_rate = 30 # Stamina recovered per second when not blocking
-        
+
+
+
+    def comboMeasure(self):
+        comboDelay = 1.5
+        if self.attacking:
+            startTime = dt
+            self.combo += 1
+            while startTime + 1500 > dt:
+                if self.attacking and self.combo != 4:
+                    self.combo +=1
+                if self.combo ==4:
+                    knockback()
+
+
+
     def initial_setup(self, screen_width, screen_height):
         # Calculate size based on screen dimensions
         w = int(screen_width * self.width_ratio)
@@ -244,6 +262,9 @@ class Player(pg.sprite.Sprite):
         self.apply_gravity(screen_height)
         self.update_attack(dt)
 
+    def knockback(self):
+        
+
 # --- Game Setup ---
 player1 = Player(0.2, PLAYER1_COLOR, {"left": pg.K_a, 
                                       "right": pg.K_d, 
@@ -379,12 +400,12 @@ def draw_bars(surface, width, height, player1, player2):
 
 # --- Main Loop ---
 loop_variable = True
-pg.mixer.music.play()
 while loop_variable:
     # dt (delta time) is crucial for frame-rate independent movement and optimalisng the game
     dt = clock.tick(60) / 1000
     width, height = screen.get_size()
 
+    music.play()
     for event in pg.event.get():
         if event.type == pg.QUIT:
             loop_variable = False
