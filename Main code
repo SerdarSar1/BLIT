@@ -7,7 +7,8 @@ initial_width, initial_height = 800, 500
 screen = pg.display.set_mode((initial_width, initial_height), pg.RESIZABLE)
 clock = pg.time.Clock()
 pg.display.set_caption('Fighter Game')
-
+fireball_image = pg.image.load("C:/Users/saira/OneDrive/Desktop/Python projects/Fighter game/wmremove-transformed.png").convert_alpha()
+pg.display.set_icon(fireball_image)
 fullscreen = False
 ko_triggered = False
 ko_y = -200
@@ -22,9 +23,6 @@ BLOCK_SHIELD_COLOR = (50, 50, 255, 150)
 all_sprites = pg.sprite.Group()
 fireballs = pg.sprite.Group()
 
-music = pg.mixer.music.load(r"C:\Users\20saris\OneDrive - Tudor Grange Academies Trust\Programming\2025-09-16_-_Mr_Wick_-_David_Fesliyan_-_www.fesliyanstudios.com-DRUMS-AND-BASS-ONLY.mp3")
-
-fireball_image = pg.image.load(r"C:\Users\20saris\OneDrive - Tudor Grange Academies Trust\Programming\fireball.png").convert_alpha()
 
 
 class Fireball(pg.sprite.Sprite):
@@ -82,29 +80,23 @@ class Player(pg.sprite.Sprite):
         self.can_special = True 
         self.special_cooldown_timer = 0
         self.special_cooldown_time = 0.5 
-        
-        self.combo = 0
-        self.start_combo = False
 
         # Blocking Stamina Attributes
         self.block_stamina = 100
         self.max_block_stamina = 100
         self.block_drain_rate = 100 # Stamina drained per second while blocking
         self.block_recover_rate = 30 # Stamina recovered per second when not blocking
+        
+                # --- COMBO / STUN SYSTEM ---
+        self.combo_count = 0
+        self.last_hit_time = 0
+        self.combo_reset_time = 0.8
 
+        self.stunned = False
+        self.stun_timer = 0
+        self.knockback_velocity = 0
 
-
-    def comboMeasure(self):
-        comboDelay = 1.5
-        if self.attacking:
-            startTime = dt
-            self.combo += 1
-            while startTime + 1500 > dt:
-                if self.attacking and self.combo != 4:
-                    self.combo +=1
-                if self.combo ==4:
-                    knockback()
-
+        self.last_attack_was_special = False
 
 
     def initial_setup(self, screen_width, screen_height):
@@ -144,7 +136,8 @@ class Player(pg.sprite.Sprite):
             self.rect.right = screen_width
         
     def handle_input(self, dt, screen_height, screen_width):
-        if ko_triggered:
+
+        if ko_triggered or self.stunned:
             return
         keys = pg.key.get_pressed()
         floor = 0.8 * screen_height
@@ -194,7 +187,19 @@ class Player(pg.sprite.Sprite):
     def apply_gravity(self, screen_height):
         floor = 0.8 * screen_height
         
-   
+                # Knockback movement
+        if self.knockback_velocity != 0:
+            self.rect.x += self.knockback_velocity
+            self.knockback_velocity *= 0.85
+            if abs(self.knockback_velocity) < 1:
+                self.knockback_velocity = 0
+
+                # Stun timer
+        if self.stunned:
+            self.stun_timer -= 1 / 60
+            if self.stun_timer <= 0:
+                self.stunned = False
+
         GRAVITY_ACCELERATION_RATIO = 0.002
         GRAVITY_ACCELERATION = screen_height * GRAVITY_ACCELERATION_RATIO
         
@@ -211,17 +216,16 @@ class Player(pg.sprite.Sprite):
         
         if self.facing == "right":
             self.active_hitbox = pg.Rect(self.rect.right, self.rect.top + 0.2*h, 0.3*w, 0.6*h)
-        else:
+        if self.facing == "left" :
             self.active_hitbox = pg.Rect(self.rect.left - 0.3*w, self.rect.top + 0.2*h, 0.3*w, 0.6*h)
-        
-        
         self.hit_opponents = []
         
     def start_special(self, screen_width):
         self.special_attack -= self.special_cost
         self.can_special = False
         self.special_cooldown_timer = self.special_cooldown_time
-        
+        self.last_attack_was_special = True
+
         # SpawnFireball
         start_x = self.rect.centerx
         start_y = self.rect.centery - 10 
@@ -261,9 +265,6 @@ class Player(pg.sprite.Sprite):
         self.handle_input(dt, screen_height, screen_width)
         self.apply_gravity(screen_height)
         self.update_attack(dt)
-
-    def knockback(self):
-        
 
 # --- Game Setup ---
 player1 = Player(0.2, PLAYER1_COLOR, {"left": pg.K_a, 
@@ -336,6 +337,15 @@ def reset_game():
     player1.facing = "right"
     player2.facing = "left"
 
+
+    player1.stunned = False
+    player2.stunned = False
+    player1.combo_count = 0
+    player2.combo_count = 0
+    player1.knockback_velocity = 0
+    player2.knockback_velocity = 0
+
+
     for f in fireballs:
         f.kill()
 
@@ -405,7 +415,6 @@ while loop_variable:
     dt = clock.tick(60) / 1000
     width, height = screen.get_size()
 
-    music.play()
     for event in pg.event.get():
         if event.type == pg.QUIT:
             loop_variable = False
@@ -421,25 +430,37 @@ while loop_variable:
         if event.type == pg.VIDEORESIZE:    
             player1.update_rect(width, height)
             player2.update_rect(width, height)
-            #ai made changes under here
-        if ko_triggered and event.type == pg.MOUSEBUTTONDOWN:
-            if replay_rect.collidepoint(event.pos):
-                reset_game()
     
     
     screen.fill(BG_COLOR)
     def handle_attack(attacker, defender, damage):
+        now = pg.time.get_ticks() / 1000
+
         if attacker.active_hitbox and defender not in attacker.hit_opponents and attacker.active_hitbox.colliderect(defender.rect):
-            if not defender.blocking:
-                defender.deal_damage(damage)
-            # Both players gain special
-            attacker.gain_special(damage * 1.5)  # attacker
-            defender.gain_special(damage * 0.5)  # defender
+
+            # Combo reset if too slow
+            if now - attacker.last_hit_time > attacker.combo_reset_time:
+                attacker.combo_count = 0
+
+            attacker.combo_count += 1
+            attacker.last_hit_time = now
             attacker.hit_opponents.append(defender)
 
+            if not defender.blocking:
+                defender.deal_damage(damage)
 
+            # Gain special
+            attacker.gain_special(damage * 1.5)
+            defender.gain_special(damage * 0.5)
 
-
+            # --- 4 HIT COMBO EFFECT ---
+            if attacker.combo_count >= 4:
+                defender.stunned = True
+                defender.stun_timer = 0.7
+                defender.knockback_velocity = 18 if attacker.facing == "right" else -18
+                attacker.combo_count = 0
+            
+            attacker.last_attack_was_special = False
 
     if not ko_triggered:
        
@@ -458,22 +479,62 @@ while loop_variable:
         handle_attack(player2, player1, 5)
 
         # Fireball collisions
-        for fireball in fireballs:
-            if fireball.owner != player1 and fireball.rect.colliderect(player1.rect):
-                if not player1.blocking:
-                    player1.deal_damage(fireball.damage)
-                # Both attacker and defender gain special
-                fireball.owner.gain_special(fireball.damage * 1.5)
-                player1.gain_special(fireball.damage * 0.5)
-                fireball.kill()
+    for fireball in fireballs:
+        if fireball.owner != player1 and fireball.rect.colliderect(player1.rect):
 
-            elif fireball.owner != player2 and fireball.rect.colliderect(player2.rect):
-                if not player2.blocking:
-                    player2.deal_damage(fireball.damage)
-                # Both attacker and defender gain special
-                fireball.owner.gain_special(fireball.damage * 1.5)
-                player2.gain_special(fireball.damage * 0.5)
-                fireball.kill()
+            attacker = fireball.owner
+            defender = player1
+            now = pg.time.get_ticks() / 1000
+
+            # Combo timing
+            if now - attacker.last_hit_time > attacker.combo_reset_time:
+                attacker.combo_count = 0
+
+            attacker.combo_count += 1
+            attacker.last_hit_time = now
+
+            if not defender.blocking:
+                defender.deal_damage(fireball.damage)
+
+            attacker.gain_special(fireball.damage * 1.5)
+            defender.gain_special(fireball.damage * 0.5)
+
+            # SPECIAL FINISHER KNOCKBACK
+            if attacker.combo_count >= 4:
+                defender.stunned = True
+                defender.stun_timer = 0.9
+                defender.knockback_velocity = 35 if attacker.facing == "right" else -35
+                attacker.combo_count = 0
+
+            fireball.kill()
+
+
+        elif fireball.owner != player2 and fireball.rect.colliderect(player2.rect):
+
+            attacker = fireball.owner
+            defender = player2
+            now = pg.time.get_ticks() / 1000
+
+            if now - attacker.last_hit_time > attacker.combo_reset_time:
+                attacker.combo_count = 0
+
+            attacker.combo_count += 1
+            attacker.last_hit_time = now
+
+            if not defender.blocking:
+                defender.deal_damage(fireball.damage)
+
+            attacker.gain_special(fireball.damage * 1.5)
+            defender.gain_special(fireball.damage * 0.5)
+
+            if attacker.combo_count >= 4:
+                defender.stunned = True
+                defender.stun_timer = 0.9
+                defender.knockback_velocity = 35 if attacker.facing == "right" else -35
+                attacker.combo_count = 0
+
+            fireball.kill()
+
 
 
     # --- Drawing ---
@@ -512,7 +573,6 @@ while loop_variable:
             ko_font = pg.font.SysFont("Arial", int(0.25*height), bold=True)
 
         winner_font = pg.font.SysFont("Arial", int(0.12*height), bold=True)
-
         ko_text_str = "KO"
         main_color = (255, 255, 255) 
         
@@ -543,14 +603,17 @@ while loop_variable:
         button_y = int(ko_y + 0.30 * height)
 
         replay_rect = pg.Rect(button_x, button_y, button_width, button_height)
-        pg.draw.rect(screen, (200, 200, 200), replay_rect, border_radius=10)
+        pg.draw.rect(screen, (200,200,200), replay_rect, border_radius=10)
         font = pg.font.SysFont("Arial", int(0.07 * height), bold=True)
-        text = font.render("REPLAY", True, (255,255,255))
+        text = font.render("REPLAY", True, (255, 255, 255))
         text_rect = text.get_rect(center=replay_rect.center)
         screen.blit(text, text_rect)
+        
+        if ko_triggered and event.type == pg.MOUSEBUTTONDOWN:
+            if replay_rect.collidepoint(event.pos):
+                reset_game()
     
 
     pg.display.update()
 
 pg.quit()
-
