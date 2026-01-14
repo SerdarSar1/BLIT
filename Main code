@@ -23,8 +23,6 @@ BLOCK_SHIELD_COLOR = (50, 50, 255, 150)
 all_sprites = pg.sprite.Group()
 fireballs = pg.sprite.Group()
 
-
-
 class Fireball(pg.sprite.Sprite):
     def __init__(self, start_x, start_y, direction, color, screen_width):
         super().__init__()
@@ -50,10 +48,9 @@ class Fireball(pg.sprite.Sprite):
         # Remove fireball if goes off screen
         if self.rect.right < 0 or self.rect.left > self.screen_width:
             self.kill()
-
 # --- Player Class ---
 class Player(pg.sprite.Sprite):
-    def __init__(self, x_ratio, color, controls):
+    def __init__(self, x_ratio, color, controls, typeofspecial):
         super().__init__()
         self.color = color
         self.x_ratio = x_ratio
@@ -74,6 +71,9 @@ class Player(pg.sprite.Sprite):
         self.facing = "right" if x_ratio < 0.5 else "left" # Face
         self.health = 100
         self.max_health = 100
+        
+        self.typeofspecial = typeofspecial
+
         self.special_attack = 0
         self.max_special = 300 # Max special is 3
         self.special_cost = 100 # Cost to use one shot
@@ -97,6 +97,10 @@ class Player(pg.sprite.Sprite):
         self.knockback_velocity = 0
 
         self.last_attack_was_special = False
+
+        self.max_jumps = 2
+        self.jump_count = 0
+        self.jump_pressed = False
 
 
     def initial_setup(self, screen_width, screen_height):
@@ -153,8 +157,16 @@ class Player(pg.sprite.Sprite):
         JUMP_VELOCITY_RATIO = -0.036 
         JUMP_VELOCITY = screen_height * JUMP_VELOCITY_RATIO
         
-        if keys[self.controls["jump"]] and self.rect.bottom >= floor - 5:
-            self.gravity = JUMP_VELOCITY 
+        # --- JUMP (edge-triggered) ---
+        if keys[self.controls["jump"]]:
+            if not self.jump_pressed and self.jump_count < self.max_jumps:
+                self.gravity = JUMP_VELOCITY
+                self.jump_count += 1
+                self.jump_pressed = True
+        else:
+            self.jump_pressed = False
+
+
 
         # Blocking 
         if keys[self.controls["block"]]:  
@@ -178,7 +190,7 @@ class Player(pg.sprite.Sprite):
         # BasicAttack
         if keys[self.controls["attack"]]:
             if not self.attacking and not self.blocking:
-                self.start_attack()
+                self.start_attack(screen_height)
         
         #Special Attack 
         if keys[self.controls["special"]] and self.special_attack >= self.special_cost and self.can_special and not self.attacking and not self.blocking:
@@ -208,31 +220,88 @@ class Player(pg.sprite.Sprite):
         if self.rect.bottom >= floor:
             self.rect.bottom = floor
             self.gravity = 0
+            self.jump_count = 0
 
-    def start_attack(self):
+    def start_attack(self, screen_height):
         self.attacking = True
-        self.attack_timer = 0.2 
+        self.attack_timer = 0.2
         w, h = self.rect.width, self.rect.height
-        
-        if self.facing == "right":
-            self.active_hitbox = pg.Rect(self.rect.right, self.rect.top + 0.2*h, 0.3*w, 0.6*h)
-        if self.facing == "left" :
-            self.active_hitbox = pg.Rect(self.rect.left - 0.3*w, self.rect.top + 0.2*h, 0.3*w, 0.6*h)
+
+        keys = pg.key.get_pressed()
+        up_attack = keys[self.controls["jump"]]
+        airborne = self.is_airborne(screen_height)
+
+        # --- UP ATTACK ---
+        if up_attack:
+            if airborne:
+                # UP AIR ATTACK
+                self.active_hitbox = pg.Rect(
+                    self.rect.centerx - 0.2*w,
+                    self.rect.top - 0.5*h,
+                    0.4*w,
+                    0.5*h
+                )
+            else:
+                # UP GROUND ATTACK
+                self.active_hitbox = pg.Rect(
+                    self.rect.centerx - 0.25*w,
+                    self.rect.top - 0.4*h,
+                    0.5*w,
+                    0.4*h
+                )
+
+        # --- FORWARD ATTACK ---
+        else:
+            if self.facing == "right":
+                self.active_hitbox = pg.Rect(
+                    self.rect.right,
+                    self.rect.top + 0.2*h,
+                    0.35*w,
+                    0.6*h
+                )
+            else:
+                self.active_hitbox = pg.Rect(
+                    self.rect.left - 0.35*w,
+                    self.rect.top + 0.2*h,
+                    0.35*w,
+                    0.6*h
+                )
+
         self.hit_opponents = []
-        
+
     def start_special(self, screen_width):
         self.special_attack -= self.special_cost
         self.can_special = False
         self.special_cooldown_timer = self.special_cooldown_time
         self.last_attack_was_special = True
-
-        # SpawnFireball
-        start_x = self.rect.centerx
-        start_y = self.rect.centery - 10 
-        fireball = Fireball(start_x, start_y, self.facing, FIREBALL_COLOR, screen_width)
-        fireball.owner = self # prevent self-damage
-        all_sprites.add(fireball)
-        fireballs.add(fireball)
+        #
+        if self.typeofspecial == "fireball":
+            # SpawnFireball
+            start_x = self.rect.centerx
+            start_y = self.rect.centery - 10 
+            fireball = Fireball(start_x, start_y, self.facing, FIREBALL_COLOR, screen_width)
+            fireball.owner = self # prevent self-damage
+            all_sprites.add(fireball)
+            fireballs.add(fireball)
+        
+        if self.typeofspecial == "dash":
+            if self.facing == "right":
+                self.rect.centerx += 300
+            else:
+                self.rect.centerx -= 300
+        
+        if self.typeofspecial == "heal":
+            self.health += 20
+            if self.health > self.max_health:
+                self.health = self.max_health
+        
+        if self.typeofspecial == "shockwave":
+            w, h = self.rect.width, self.rect.height
+            shockwave_radius = max(w, h) * 1.85
+            self.active_hitbox = pg.Rect(self.rect.centerx - shockwave_radius / 2,self.rect.centery - shockwave_radius / 2,shockwave_radius,shockwave_radius)
+            self.attacking = True
+            self.attack_timer = 0.3
+            self.hit_opponents = []
 
     def update_attack(self, dt):
         # Basic Attack Timer
@@ -261,10 +330,15 @@ class Player(pg.sprite.Sprite):
         self.gain_special(amount * 0.5) 
 
     def update(self, dt, screen_width, screen_height):
+
         self.update_rect(screen_width, screen_height)
         self.handle_input(dt, screen_height, screen_width)
         self.apply_gravity(screen_height)
         self.update_attack(dt)
+    
+    def is_airborne(self, screen_height):
+        floor = 0.8 * screen_height
+        return self.rect.bottom < floor - 5
 
 # --- Game Setup ---
 player1 = Player(0.2, PLAYER1_COLOR, {"left": pg.K_a, 
@@ -272,13 +346,13 @@ player1 = Player(0.2, PLAYER1_COLOR, {"left": pg.K_a,
                                       "jump": pg.K_w,
                                       "attack": pg.K_e, 
                                       "special": pg.K_r, 
-                                      "block": pg.K_t})
+                                      "block": pg.K_t},"shockwave")
 player2 = Player(0.8, PLAYER2_COLOR, {"left": pg.K_LEFT,
                                       "right": pg.K_RIGHT, 
                                       "jump": pg.K_UP,
                                       "attack": pg.K_KP1,
                                       "special": pg.K_KP2,
-                                      "block": pg.K_KP3})
+                                      "block": pg.K_KP3},"fireball")
 
 
 player1.initial_setup(initial_width, initial_height)
@@ -286,7 +360,6 @@ player2.initial_setup(initial_width, initial_height)
 
 players = pg.sprite.Group(player1, player2)
 all_sprites.add(player1, player2)
-
 
 def draw_block_shield(surface, player):
     if player.blocking:
@@ -406,7 +479,6 @@ def draw_bars(surface, width, height, player1, player2):
     filled_width = block_bar_width * (player2.block_stamina / player2.max_block_stamina)
     # Draw from right to left
     pg.draw.rect(surface, block_color, (bar_x + block_bar_width - filled_width, bar_y_block, filled_width, block_bar_height))
-
 
 # --- Main Loop ---
 loop_variable = True
