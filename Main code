@@ -87,7 +87,6 @@ class Player(pg.sprite.Sprite):
         self.block_drain_rate = 100 # Stamina drained per second while blocking
         self.block_recover_rate = 30 # Stamina recovered per second when not blocking
         
-                # --- COMBO / STUN SYSTEM ---
         self.combo_count = 0
         self.last_hit_time = 0
         self.combo_reset_time = 0.8
@@ -95,12 +94,18 @@ class Player(pg.sprite.Sprite):
         self.stunned = False
         self.stun_timer = 0
         self.knockback_velocity = 0
+        
+        self.shockwave_damage = 30
+        self.shockwave_base_damage = 15
+        self.shockwave_height_multiplier = 0.08
 
         self.last_attack_was_special = False
 
         self.max_jumps = 2
         self.jump_count = 0
         self.jump_pressed = False
+
+        self.display_health = self.health
 
 
     def initial_setup(self, screen_width, screen_height):
@@ -285,10 +290,27 @@ class Player(pg.sprite.Sprite):
             fireballs.add(fireball)
         
         if self.typeofspecial == "dash":
+            dash_distance = 300
+            dash_damage = 20
+
             if self.facing == "right":
-                self.rect.centerx += 300
+                self.rect.centerx += dash_distance
+                hitbox_x = self.rect.left - dash_distance
             else:
-                self.rect.centerx -= 300
+                self.rect.centerx -= dash_distance
+                hitbox_x = self.rect.right
+
+            self.active_hitbox = pg.Rect(
+                hitbox_x,
+                self.rect.top,
+                dash_distance,
+                self.rect.height
+            )
+
+            self.attacking = True
+            self.attack_timer = 0.15
+            self.hit_opponents = []
+
         
         if self.typeofspecial == "heal":
             self.health += 20
@@ -335,7 +357,8 @@ class Player(pg.sprite.Sprite):
         self.handle_input(dt, screen_height, screen_width)
         self.apply_gravity(screen_height)
         self.update_attack(dt)
-    
+        self.display_health += (self.health - self.display_health) * 0.12
+
     def is_airborne(self, screen_height):
         floor = 0.8 * screen_height
         return self.rect.bottom < floor - 5
@@ -352,8 +375,7 @@ player2 = Player(0.8, PLAYER2_COLOR, {"left": pg.K_LEFT,
                                       "jump": pg.K_UP,
                                       "attack": pg.K_KP1,
                                       "special": pg.K_KP2,
-                                      "block": pg.K_KP3},"fireball")
-
+                                      "block": pg.K_KP3},"dash")
 
 player1.initial_setup(initial_width, initial_height)
 player2.initial_setup(initial_width, initial_height)
@@ -370,10 +392,8 @@ def draw_block_shield(surface, player):
         
         shield_surface = pg.Surface((shield_w, shield_h), pg.SRCALPHA)
         
-        # Define the rect for the ellipse, which will fill the shield_surface
         ellipse_rect = shield_surface.get_rect()
         
-        # Draw the filled ellipse onto the transparent surface
         pg.draw.ellipse(shield_surface, BLOCK_SHIELD_COLOR, ellipse_rect)
         
         shield_rect = shield_surface.get_rect(center=player.rect.center)
@@ -424,66 +444,60 @@ def reset_game():
 
 def draw_bars(surface, width, height, player1, player2):
     bar_height = 0.05 * height
-    segments = 10
-    special_segments = 3 
     seg_width = width * 0.03
-    
-    #Health Bars
-    for i in range(segments):
-        # P1 Health
-        color = PLAYER1_COLOR if player1.health >= (i+1)*10 else (100,0,0)
-        pg.draw.rect(surface, color, (i*seg_width, 0, seg_width-2, bar_height))
-        # P2 Health
-        color = PLAYER2_COLOR if player2.health >= (i+1)*10 else (0,0,100)
-        pg.draw.rect(surface, color, (width - (i+1)*seg_width, 0, seg_width-2, bar_height))
-
-    #Special Bars
-    special_bar_width = seg_width * special_segments
-    bar_y_special = bar_height + 5
-
-    # P1 Special Meter
-    bar_x = 0
-    pg.draw.rect(surface, (50,0,50), (bar_x, bar_y_special, special_bar_width, bar_height)) 
-    filled_width = special_bar_width * (player1.special_attack / player1.max_special) 
-    pg.draw.rect(surface, PLAYER1_COLOR, (bar_x, bar_y_special, filled_width, bar_height))
-    # Draw separation lines 
-    for j in range(1, special_segments): 
-        line_x = bar_x + j * seg_width
-        pg.draw.line(surface, (255, 255, 255), (line_x, bar_y_special), (line_x, bar_y_special + bar_height), 2)
-
-    # P2 Special Meter
-    bar_x = width - special_bar_width
-    pg.draw.rect(surface, (50,0,50), (bar_x, bar_y_special, special_bar_width, bar_height)) 
-    filled_width = special_bar_width * (player2.special_attack / player2.max_special) 
-    pg.draw.rect(surface, PLAYER2_COLOR, (bar_x + special_bar_width - filled_width, bar_y_special, filled_width, bar_height)) 
-    # Draw separation lines 
-    for j in range(1, special_segments): 
-        line_x = bar_x + j * seg_width
-        pg.draw.line(surface, (255, 255, 255), (line_x, bar_y_special), (line_x, bar_y_special + bar_height), 2)
-
-    #Block Stamina Bars
-    block_bar_width = seg_width * 3 #bar size is 3 segments wide
-    bar_y_block = bar_y_special + bar_height + 5
-    block_color = (0, 200, 255) # blue for the bar
+    special_segments = 3
     block_bar_height = bar_height / 2
+    spacing = 5
 
-    #Block Stamina
+    pg.draw.rect(surface, (60, 60, 60), (0, 0, width * 0.35, bar_height))
+    pg.draw.rect(surface, (230, 230, 230), (0, 0, (width*0.35) * (player1.display_health/player1.max_health), bar_height))
+    color_hp1 = PLAYER1_COLOR if player1.health/player1.max_health >= 0.3 else (255, 80, 80)
+    pg.draw.rect(surface, color_hp1, (0, 0, (width*0.35) * (player1.health/player1.max_health), bar_height))
+
+    bar_y_special = bar_height + spacing
+    special_bar_width = seg_width * special_segments
     bar_x = 0
-    pg.draw.rect(surface, (20, 20, 70), (bar_x, bar_y_block, block_bar_width, block_bar_height))
-    filled_width = block_bar_width * (player1.block_stamina / player1.max_block_stamina)
-    pg.draw.rect(surface, block_color, (bar_x, bar_y_block, filled_width, block_bar_height))
+    pg.draw.rect(surface, (50,0,50), (bar_x, bar_y_special, special_bar_width, bar_height))
+    filled_width = special_bar_width * (player1.special_attack/player1.max_special)
+    pg.draw.rect(surface, PLAYER1_COLOR, (bar_x, bar_y_special, filled_width, bar_height))
+    for j in range(1, special_segments):
+        line_x = bar_x + j * seg_width
+        pg.draw.line(surface, (255,255,255), (line_x, bar_y_special), (line_x, bar_y_special+bar_height), 2)
 
-    # P2 Block Stamina
+    bar_y_block = bar_y_special + bar_height + spacing
+    block_bar_width = seg_width * 3
+    bar_x = 0
+    pg.draw.rect(surface, (20,20,70), (bar_x, bar_y_block, block_bar_width, block_bar_height))
+    filled_width = block_bar_width * (player1.block_stamina/player1.max_block_stamina)
+    pg.draw.rect(surface, (0,200,255), (bar_x, bar_y_block, filled_width, block_bar_height))
+
+    bar_width_p2 = width * 0.35
+    pg.draw.rect(surface, (60,60,60), (width - bar_width_p2, 0, bar_width_p2, bar_height))
+    chip_width = bar_width_p2 * (player2.display_health/player2.max_health)
+    pg.draw.rect(surface, (230,230,230), (width - bar_width_p2 + bar_width_p2 - chip_width, 0, chip_width, bar_height))
+    real_width = bar_width_p2 * (player2.health/player2.max_health)
+    color_hp2 = PLAYER2_COLOR if player2.health/player2.max_health >= 0.3 else (255,80,80)
+    pg.draw.rect(surface, color_hp2, (width - bar_width_p2 + bar_width_p2 - real_width, 0, real_width, bar_height))
+
+    bar_y_special = bar_height + spacing
+    special_bar_width = seg_width * special_segments
+    bar_x = width - special_bar_width
+    pg.draw.rect(surface, (50,0,50), (bar_x, bar_y_special, special_bar_width, bar_height))
+    filled_width = special_bar_width * (player2.special_attack/player2.max_special)
+    pg.draw.rect(surface, PLAYER2_COLOR, (bar_x + special_bar_width - filled_width, bar_y_special, filled_width, bar_height))
+    for j in range(1, special_segments):
+        line_x = bar_x + j * seg_width
+        pg.draw.line(surface, (255,255,255), (line_x, bar_y_special), (line_x, bar_y_special+bar_height), 2)
+
+    bar_y_block = bar_y_special + bar_height + spacing
+    block_bar_width = seg_width * 3
     bar_x = width - block_bar_width
-    pg.draw.rect(surface, (20, 20, 70), (bar_x, bar_y_block, block_bar_width, block_bar_height))
-    filled_width = block_bar_width * (player2.block_stamina / player2.max_block_stamina)
-    # Draw from right to left
-    pg.draw.rect(surface, block_color, (bar_x + block_bar_width - filled_width, bar_y_block, filled_width, block_bar_height))
+    pg.draw.rect(surface, (20,20,70), (bar_x, bar_y_block, block_bar_width, block_bar_height))
+    filled_width = block_bar_width * (player2.block_stamina/player2.max_block_stamina)
+    pg.draw.rect(surface, (0,200,255), (bar_x + block_bar_width - filled_width, bar_y_block, filled_width, block_bar_height))
 
-# --- Main Loop ---
 loop_variable = True
 while loop_variable:
-    # dt (delta time) is crucial for frame-rate independent movement and optimalisng the game
     dt = clock.tick(60) / 1000
     width, height = screen.get_size()
 
@@ -505,12 +519,12 @@ while loop_variable:
     
     
     screen.fill(BG_COLOR)
-    def handle_attack(attacker, defender, damage):
+    def handle_attack(attacker, defender, base_damage):
         now = pg.time.get_ticks() / 1000
 
         if attacker.active_hitbox and defender not in attacker.hit_opponents and attacker.active_hitbox.colliderect(defender.rect):
 
-            # Combo reset if too slow
+            # Combo reset
             if now - attacker.last_hit_time > attacker.combo_reset_time:
                 attacker.combo_count = 0
 
@@ -518,21 +532,34 @@ while loop_variable:
             attacker.last_hit_time = now
             attacker.hit_opponents.append(defender)
 
+            damage = base_damage
+
+            if attacker.last_attack_was_special:    
+                if attacker.typeofspecial == "shockwave":
+                    floor = 0.8 * height  # same floor logic as everywhere else
+                    height_above_ground = max(0, floor - attacker.rect.bottom)
+                    damage = (attacker.shockwave_base_damage +height_above_ground * attacker.shockwave_height_multiplier)
+
+                elif attacker.typeofspecial == "dash":
+                    damage = 20
+
             if not defender.blocking:
                 defender.deal_damage(damage)
 
-            # Gain special
             attacker.gain_special(damage * 1.5)
             defender.gain_special(damage * 0.5)
 
-            # --- 4 HIT COMBO EFFECT ---
             if attacker.combo_count >= 4:
                 defender.stunned = True
                 defender.stun_timer = 0.7
                 defender.knockback_velocity = 18 if attacker.facing == "right" else -18
                 attacker.combo_count = 0
-            
+
+            if attacker.last_attack_was_special and attacker.typeofspecial == "dash":
+                defender.knockback_velocity = 25 if attacker.facing == "right" else -25
+
             attacker.last_attack_was_special = False
+
 
     if not ko_triggered:
        
@@ -540,11 +567,8 @@ while loop_variable:
         # Update fireballs (handles movement)
         fireballs.update(dt) 
 
-        # Players gain special meter passively
         player1.gain_special(10 * dt)
         player2.gain_special(10 * dt)
-
-        # --- Collision Logic ---
         
         # Basic Attack vs Player
         handle_attack(player1, player2, 5)
@@ -609,26 +633,19 @@ while loop_variable:
 
 
 
-    # --- Drawing ---
-    
-    # Draw players and active fireballs
     all_sprites.draw(screen) 
 
-    # Draw the Block Shield for both players (NOW AN ELLIPSE)
     draw_block_shield(screen, player1)
     draw_block_shield(screen, player2)
 
-    # Draw basic attack hitboxes 
     if player1.active_hitbox:
         pg.draw.rect(screen, PLAYER1_COLOR, player1.active_hitbox, 2)
     if player2.active_hitbox:
         pg.draw.rect(screen, PLAYER2_COLOR, player2.active_hitbox, 2)
 
-    # Draw all status bars (Health, Special, Block Stamina)
     draw_bars(screen, width, height, player1, player2)
 
-
-    # --- KO Animation ---
+    #KO
     if not ko_triggered and (player1.health <= 0 or player2.health <= 0):
         ko_triggered = True
         ko_y = -0.4 * height
