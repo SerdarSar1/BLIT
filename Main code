@@ -32,22 +32,21 @@ class Fireball(pg.sprite.Sprite):
         self.screen_width = screen_width
         self.owner = None
 
-        # Use image and scale
         self.original_image = fireball_image
         self.image = pg.transform.scale(self.original_image, (30, 30)) 
         if self.direction == "left":
             self.image = pg.transform.flip(self.image, True, False)
         self.rect = self.image.get_rect(center=(start_x, start_y))
 
-    def update(self, dt, *args): # dt is the only argument for movement
+    def update(self, dt, *args): 
         if self.direction == "right":
             self.rect.x += self.speed * dt
         else:
             self.rect.x -= self.speed * dt
         
-        # Remove fireball if goes off screen
         if self.rect.right < 0 or self.rect.left > self.screen_width:
             self.kill()
+
 # --- Player Class ---
 class Player(pg.sprite.Sprite):
     def __init__(self, x_ratio, color, controls, typeofspecial):
@@ -57,7 +56,6 @@ class Player(pg.sprite.Sprite):
         self.width_ratio = 0.06
         self.height_ratio = 0.2
         
-        # Player attributes
         self.image = pg.Surface((50, 100))
         self.image.fill(color)
         self.rect = self.image.get_rect() 
@@ -68,24 +66,22 @@ class Player(pg.sprite.Sprite):
         self.blocking = False
         self.active_hitbox = None
         self.hit_opponents = []
-        self.facing = "right" if x_ratio < 0.5 else "left" # Face
+        self.facing = "right" if x_ratio < 0.5 else "left"
         self.health = 100
         self.max_health = 100
         
         self.typeofspecial = typeofspecial
-
-        self.special_attack = 0
-        self.max_special = 300 # Max special is 3
-        self.special_cost = 100 # Cost to use one shot
+        self.special_attack = 300
+        self.max_special = 300
+        self.special_cost = 100
         self.can_special = True 
         self.special_cooldown_timer = 0
         self.special_cooldown_time = 0.5 
 
-        # Blocking Stamina Attributes
         self.block_stamina = 100
         self.max_block_stamina = 100
-        self.block_drain_rate = 100 # Stamina drained per second while blocking
-        self.block_recover_rate = 30 # Stamina recovered per second when not blocking
+        self.block_drain_rate = 100
+        self.block_recover_rate = 30
         
         self.combo_count = 0
         self.last_hit_time = 0
@@ -99,179 +95,183 @@ class Player(pg.sprite.Sprite):
         self.shockwave_base_damage = 15
         self.shockwave_height_multiplier = 0.08
 
-        self.last_attack_was_special = False
+        self.attack_type = "normal"
 
         self.max_jumps = 2
         self.jump_count = 0
         self.jump_pressed = False
 
+        # Dash state
+        self.dashing = False
+        self.dash_speed = 3000
+        self.dash_time = 0.08
+        self.dash_timer = 0
+        self.dash_trail = []  
+        self.dash_trail_max = 10  
+
+        self.max_dash_charges = 3
+        self.dash_charges = 0
+        self.dash_hit_this_dash = False
+
         self.display_health = self.health
+        
+        if self.typeofspecial == "joker":
+            self.joker_deck = ["fireball", "dash", "heal", "shockwave"]  # list
+            r.shuffle(self.joker_deck)  # shuffle 
+            self.joker_index = 0          # points to next
+            self.joker_current = self.joker_deck[self.joker_index]
+        else:
+            self.joker_deck = None
+            self.joker_index = None
+            self.joker_current = None
 
 
     def initial_setup(self, screen_width, screen_height):
-        # Calculate size based on screen dimensions
         w = int(screen_width * self.width_ratio)
         h = int(screen_height * self.height_ratio)
         floor = 0.8 * screen_height
         
-        # Update image
         self.image = pg.Surface((w,h))
         self.image.fill(self.color)
-        
-        # Set initial position
         self.rect = self.image.get_rect(midbottom=(int(screen_width * self.x_ratio), floor))
 
     def update_rect(self, screen_width, screen_height):
         w = int(screen_width * self.width_ratio)
         h = int(screen_height * self.height_ratio)
         floor = 0.8 * screen_height
-        
-        # Store current position before resizing
         old_midbottom = self.rect.midbottom
         
-        # Update image
         self.image = pg.Surface((w,h))
         self.image.fill(self.color)
         self.rect = self.image.get_rect(midbottom=old_midbottom)
 
-        #floor
         if self.rect.bottom > floor:
             self.rect.bottom = floor
-        
-        #screen edges
         if self.rect.left < 0:
             self.rect.left = 0
         if self.rect.right > screen_width:
             self.rect.right = screen_width
-        
-    def handle_input(self, dt, screen_height, screen_width):
 
+    def handle_input(self, dt, screen_height, screen_width):
         if ko_triggered or self.stunned:
             return
         keys = pg.key.get_pressed()
         floor = 0.8 * screen_height
         
-        # Moving
-        if keys[self.controls["left"]]:
-            self.rect.x -= self.speed * dt
-            self.facing = "left"
-        if keys[self.controls["right"]]:
-            self.rect.x += self.speed * dt
-            self.facing = "right"
-            
+        if not self.dashing:
+            if keys[self.controls["left"]]:
+                self.rect.x -= self.speed * dt
+                self.facing = "left"
+            if keys[self.controls["right"]]:
+                self.rect.x += self.speed * dt
+                self.facing = "right"
+        
+       
         JUMP_VELOCITY_RATIO = -0.036 
         JUMP_VELOCITY = screen_height * JUMP_VELOCITY_RATIO
         
-        # --- JUMP (edge-triggered) ---
+        wall_touch = None
+        if self.rect.left <= 0:
+            wall_touch = "left"
+        elif self.rect.right >= screen_width:
+            wall_touch = "right"
+
+        # Jumping + wall jump
         if keys[self.controls["jump"]]:
-            if not self.jump_pressed and self.jump_count < self.max_jumps:
-                self.gravity = JUMP_VELOCITY
-                self.jump_count += 1
+            if not self.jump_pressed:
+                if self.jump_count < self.max_jumps:
+                    self.gravity = JUMP_VELOCITY
+                    self.jump_count += 1
+                elif wall_touch:
+                    self.gravity = JUMP_VELOCITY
+                    if wall_touch == "left":
+                        self.rect.x += int(0.1 * screen_width)
+                        self.facing = "right"
+                    else:
+                        self.rect.x -= int(0.1 * screen_width)
+                        self.facing = "left"
                 self.jump_pressed = True
         else:
             self.jump_pressed = False
 
-
-
         # Blocking 
         if keys[self.controls["block"]]:  
-            if self.block_stamina > 0:
-                self.blocking = True
-            else:
-                self.blocking = False 
+            self.blocking = self.block_stamina > 0
         else:
             self.blocking = False
-        
+
         if self.blocking:
             self.block_stamina -= self.block_drain_rate * dt
             if self.block_stamina < 0:
                 self.block_stamina = 0
-                self.blocking = False 
+                self.blocking = False
         else:
             self.block_stamina += self.block_recover_rate * dt
             if self.block_stamina > self.max_block_stamina:
                 self.block_stamina = self.max_block_stamina
-        
+
         # BasicAttack
-        if keys[self.controls["attack"]]:
-            if not self.attacking and not self.blocking:
-                self.start_attack(screen_height)
+        if keys[self.controls["attack"]] and not self.attacking and not self.blocking:
+            self.start_attack(screen_height)
         
-        #Special Attack 
-        if keys[self.controls["special"]] and self.special_attack >= self.special_cost and self.can_special and not self.attacking and not self.blocking:
+        if (keys[self.controls["special"]] and
+            self.special_attack >= self.special_cost and
+            self.can_special and not self.attacking and not self.blocking):
             self.start_special(screen_width)
 
-    def apply_gravity(self, screen_height):
+    def apply_gravity(self, screen_height, screen_width=None):
         floor = 0.8 * screen_height
-        
-                # Knockback movement
+        GRAVITY_ACCELERATION_RATIO = 0.002
+        GRAVITY_ACCELERATION = screen_height * GRAVITY_ACCELERATION_RATIO
+        WALL_SLIDE_SPEED_RATIO = 0.5
+
+        # Wall slide
+        wall_touch = self.is_touching_wall(screen_width) if screen_width else None
+        if wall_touch and self.is_airborne(screen_height):
+            self.gravity = min(self.gravity, GRAVITY_ACCELERATION / WALL_SLIDE_SPEED_RATIO)
+
+        # Apply gravity
+        self.gravity += GRAVITY_ACCELERATION
+        self.rect.y += self.gravity
+
+        # Floor collision
+        if self.rect.bottom >= floor:
+            self.rect.bottom = floor
+            self.gravity = 0
+            self.jump_count = 0
+
+        # Knockback movement
         if self.knockback_velocity != 0:
             self.rect.x += self.knockback_velocity
             self.knockback_velocity *= 0.85
             if abs(self.knockback_velocity) < 1:
                 self.knockback_velocity = 0
 
-                # Stun timer
+        # Stun timer
         if self.stunned:
             self.stun_timer -= 1 / 60
             if self.stun_timer <= 0:
                 self.stunned = False
 
-        GRAVITY_ACCELERATION_RATIO = 0.002
-        GRAVITY_ACCELERATION = screen_height * GRAVITY_ACCELERATION_RATIO
-        
-        self.gravity += GRAVITY_ACCELERATION # Use scaled acceleration here
-        self.rect.y += self.gravity
-        if self.rect.bottom >= floor:
-            self.rect.bottom = floor
-            self.gravity = 0
-            self.jump_count = 0
-
     def start_attack(self, screen_height):
+        self.attack_type = "normal"
         self.attacking = True
         self.attack_timer = 0.2
         w, h = self.rect.width, self.rect.height
-
         keys = pg.key.get_pressed()
         up_attack = keys[self.controls["jump"]]
         airborne = self.is_airborne(screen_height)
 
-        # --- UP ATTACK ---
         if up_attack:
             if airborne:
-                # UP AIR ATTACK
-                self.active_hitbox = pg.Rect(
-                    self.rect.centerx - 0.2*w,
-                    self.rect.top - 0.5*h,
-                    0.4*w,
-                    0.5*h
-                )
+                self.active_hitbox = pg.Rect(self.rect.centerx - 0.2*w, self.rect.top - 0.5*h, 0.4*w, 0.5*h)
             else:
-                # UP GROUND ATTACK
-                self.active_hitbox = pg.Rect(
-                    self.rect.centerx - 0.25*w,
-                    self.rect.top - 0.4*h,
-                    0.5*w,
-                    0.4*h
-                )
-
-        # --- FORWARD ATTACK ---
+                self.active_hitbox = pg.Rect(self.rect.centerx - 0.25*w, self.rect.top - 0.4*h, 0.5*w, 0.4*h)
         else:
             if self.facing == "right":
-                self.active_hitbox = pg.Rect(
-                    self.rect.right,
-                    self.rect.top + 0.2*h,
-                    0.35*w,
-                    0.6*h
-                )
+                self.active_hitbox = pg.Rect(self.rect.right, self.rect.top + 0.2*h, 0.35*w, 0.6*h)
             else:
-                self.active_hitbox = pg.Rect(
-                    self.rect.left - 0.35*w,
-                    self.rect.top + 0.2*h,
-                    0.35*w,
-                    0.6*h
-                )
-
+                self.active_hitbox = pg.Rect(self.rect.left - 0.35*w, self.rect.top + 0.2*h, 0.35*w, 0.6*h)
         self.hit_opponents = []
 
     def start_special(self, screen_width):
@@ -279,67 +279,61 @@ class Player(pg.sprite.Sprite):
         self.can_special = False
         self.special_cooldown_timer = self.special_cooldown_time
         self.last_attack_was_special = True
-        #
-        if self.typeofspecial == "fireball":
-            # SpawnFireball
+
+        if self.typeofspecial == "joker":
+            chosen = self.joker_current
+        else:
+            chosen = self.typeofspecial
+
+        if chosen == "fireball":
+            self.attack_type = "fireball"
             start_x = self.rect.centerx
             start_y = self.rect.centery - 10 
             fireball = Fireball(start_x, start_y, self.facing, FIREBALL_COLOR, screen_width)
-            fireball.owner = self # prevent self-damage
+            fireball.owner = self
             all_sprites.add(fireball)
             fireballs.add(fireball)
-        
-        if self.typeofspecial == "dash":
-            dash_distance = 300
-            dash_damage = 20
 
-            if self.facing == "right":
-                self.rect.centerx += dash_distance
-                hitbox_x = self.rect.left - dash_distance
-            else:
-                self.rect.centerx -= dash_distance
-                hitbox_x = self.rect.right
+        if chosen == "dash":
+            self.attack_type = "dash"
+            self.dashing = True
+            self.dash_timer = self.dash_time
+            self.dash_charges = self.max_dash_charges
+            self.dash_hit_this_dash = False
+            self.hit_opponents =[]
 
-            self.active_hitbox = pg.Rect(
-                hitbox_x,
-                self.rect.top,
-                dash_distance,
-                self.rect.height
-            )
-
-            self.attacking = True
-            self.attack_timer = 0.15
-            self.hit_opponents = []
-
-        
-        if self.typeofspecial == "heal":
+        if chosen == "heal":
             self.health += 20
             if self.health > self.max_health:
                 self.health = self.max_health
-        
-        if self.typeofspecial == "shockwave":
+
+        if chosen == "shockwave":
+            self.attack_type = "shockwave"
             w, h = self.rect.width, self.rect.height
             shockwave_radius = max(w, h) * 1.85
-            self.active_hitbox = pg.Rect(self.rect.centerx - shockwave_radius / 2,self.rect.centery - shockwave_radius / 2,shockwave_radius,shockwave_radius)
+            self.active_hitbox = pg.Rect(self.rect.centerx - shockwave_radius/2, self.rect.centery - shockwave_radius/2, shockwave_radius, shockwave_radius)
             self.attacking = True
             self.attack_timer = 0.3
             self.hit_opponents = []
-
+        
+        if self.typeofspecial == "joker":
+            self.joker_index += 1
+            if self.joker_index >= len(self.joker_deck):
+                self.joker_index = 0  # looping
+            self.joker_current = self.joker_deck[self.joker_index]
+    
     def update_attack(self, dt):
-        # Basic Attack Timer
         if self.attacking:
             self.attack_timer -= dt
             if self.attack_timer <= 0:
                 self.attacking = False
                 self.active_hitbox = None
                 self.hit_opponents = []
-        
-        # Special Cooldown Timer
         if not self.can_special:
             self.special_cooldown_timer -= dt
             if self.special_cooldown_timer <= 0:
                 self.can_special = True
-    
+
     def gain_special(self, amount):
         self.special_attack += amount
         if self.special_attack > self.max_special:
@@ -352,34 +346,71 @@ class Player(pg.sprite.Sprite):
         self.gain_special(amount * 0.5) 
 
     def update(self, dt, screen_width, screen_height):
-
         self.update_rect(screen_width, screen_height)
         self.handle_input(dt, screen_height, screen_width)
-        self.apply_gravity(screen_height)
+        
+        if self.dashing:
+            direction = 1 if self.facing == "right" else -1
+            self.rect.x += direction * self.dash_speed * dt
+            self.dash_timer -= dt
+
+            self.active_hitbox = pg.Rect(
+                min(self.rect.centerx, self.rect.centerx + direction * self.dash_speed * dt),
+                self.rect.top,
+                self.rect.width * 0.6 + self.dash_speed * dt,
+                self.rect.height
+            )
+
+            # Dash trail effect
+            trail_surf = self.image.copy()
+            trail_surf.fill((255,255,255), special_flags=pg.BLEND_RGB_ADD)
+            trail_rect = trail_surf.get_rect(center=self.rect.center)
+            self.dash_trail.append([trail_surf, trail_rect, 180])
+
+            if len(self.dash_trail) > self.dash_trail_max:
+                self.dash_trail.pop(0)
+
+            if self.dash_timer <= 0:
+                self.dashing = False
+                self.active_hitbox = None
+                self.dash_hit_this_dash = False
+                self.hit_opponents = []
+
+        if not self.dashing and self.attack_type == "dash":
+            self.attack_type = "normal"
+
+
+        self.apply_gravity(screen_height, screen_width)
         self.update_attack(dt)
         self.display_health += (self.health - self.display_health) * 0.12
+
+        for trail in self.dash_trail:
+            trail[2] -= 600 * dt  # fade speed
+        self.dash_trail = [t for t in self.dash_trail if t[2] > 0]  # remove invisible
+
+        # Draw trail
+        for trail_surf, trail_rect, alpha in self.dash_trail:
+            surf = trail_surf.copy()
+            surf.set_alpha(int(alpha))
+            screen.blit(surf, trail_rect)
 
     def is_airborne(self, screen_height):
         floor = 0.8 * screen_height
         return self.rect.bottom < floor - 5
+    
+    def is_touching_wall(self, screen_width):
+        if self.rect.left <= 0:
+            return "left"
+        elif self.rect.right >= screen_width:
+            return "right"
+        return None
 
 # --- Game Setup ---
-player1 = Player(0.2, PLAYER1_COLOR, {"left": pg.K_a, 
-                                      "right": pg.K_d, 
-                                      "jump": pg.K_w,
-                                      "attack": pg.K_e, 
-                                      "special": pg.K_r, 
-                                      "block": pg.K_t},"shockwave")
-player2 = Player(0.8, PLAYER2_COLOR, {"left": pg.K_LEFT,
-                                      "right": pg.K_RIGHT, 
-                                      "jump": pg.K_UP,
-                                      "attack": pg.K_KP1,
-                                      "special": pg.K_KP2,
-                                      "block": pg.K_KP3},"dash")
+player1 = Player(0.2, PLAYER1_COLOR, {"left": pg.K_a, "right": pg.K_d, "jump": pg.K_w, "attack": pg.K_e, "special": pg.K_r, "block": pg.K_t}, "heal")
+player2 = Player(0.8, PLAYER2_COLOR, {"left": pg.K_LEFT, "right": pg.K_RIGHT, "jump": pg.K_UP, "attack": pg.K_KP1, "special": pg.K_KP2, "block": pg.K_KP3}, "joker")
 
 player1.initial_setup(initial_width, initial_height)
 player2.initial_setup(initial_width, initial_height)
-
 players = pg.sprite.Group(player1, player2)
 all_sprites.add(player1, player2)
 
@@ -519,10 +550,21 @@ while loop_variable:
     
     
     screen.fill(BG_COLOR)
-    def handle_attack(attacker, defender, base_damage):
+    def handle_attack(attacker, defender):
         now = pg.time.get_ticks() / 1000
 
-        if attacker.active_hitbox and defender not in attacker.hit_opponents and attacker.active_hitbox.colliderect(defender.rect):
+        if attacker.attack_type == "dash" and attacker.dashing and attacker.active_hitbox:
+            if attacker.active_hitbox.colliderect(defender.rect) and defender not in attacker.hit_opponents:
+                defender.deal_damage(30)
+                defender.stunned = True
+                defender.stun_timer = 0.4
+                defender.knockback_velocity = 15 if attacker.facing == "right" else -15
+
+                attacker.hit_opponents.append(defender)
+                attacker.dash_hit_this_dash = True
+            return  
+
+        if attacker.active_hitbox and attacker.active_hitbox.colliderect(defender.rect) and defender not in attacker.hit_opponents:
 
             # Combo reset
             if now - attacker.last_hit_time > attacker.combo_reset_time:
@@ -532,47 +574,41 @@ while loop_variable:
             attacker.last_hit_time = now
             attacker.hit_opponents.append(defender)
 
-            damage = base_damage
+            damage = 5 
 
-            if attacker.last_attack_was_special:    
-                if attacker.typeofspecial == "shockwave":
-                    floor = 0.8 * height  # same floor logic as everywhere else
-                    height_above_ground = max(0, floor - attacker.rect.bottom)
-                    damage = (attacker.shockwave_base_damage +height_above_ground * attacker.shockwave_height_multiplier)
+            # damage based on height
+            if attacker.attack_type == "shockwave":
+                floor = 0.8 * height
+                height_above_ground = max(0, floor - attacker.rect.bottom)
+                damage = attacker.shockwave_base_damage + height_above_ground * attacker.shockwave_height_multiplier
 
-                elif attacker.typeofspecial == "dash":
-                    damage = 20
-
+            # Apply damage if not blocking
             if not defender.blocking:
                 defender.deal_damage(damage)
 
+            # Special gain
             attacker.gain_special(damage * 1.5)
             defender.gain_special(damage * 0.5)
 
+            # Stun on combo
             if attacker.combo_count >= 4:
                 defender.stunned = True
                 defender.stun_timer = 0.7
                 defender.knockback_velocity = 18 if attacker.facing == "right" else -18
                 attacker.combo_count = 0
 
-            if attacker.last_attack_was_special and attacker.typeofspecial == "dash":
-                defender.knockback_velocity = 25 if attacker.facing == "right" else -25
-
-            attacker.last_attack_was_special = False
-
-
     if not ko_triggered:
        
         players.update(dt, width, height) 
-        # Update fireballs (handles movement)
+        # Update fireballs 
         fireballs.update(dt) 
 
         player1.gain_special(10 * dt)
         player2.gain_special(10 * dt)
         
-        # Basic Attack vs Player
-        handle_attack(player1, player2, 5)
-        handle_attack(player2, player1, 5)
+        # Basic Attack 
+        handle_attack(player1, player2)
+        handle_attack(player2, player1)
 
         # Fireball collisions
     for fireball in fireballs:
@@ -630,8 +666,6 @@ while loop_variable:
                 attacker.combo_count = 0
 
             fireball.kill()
-
-
 
     all_sprites.draw(screen) 
 
