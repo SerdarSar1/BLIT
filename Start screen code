@@ -1,2 +1,355 @@
 
-print("hello asap fan")
+import pygame as pg
+import sys
+
+pg.init()
+
+# --- SCREEN SETUP ---
+screen = pg.display.set_mode((0,0), pg.FULLSCREEN)
+pg.display.set_caption(':D')
+clock = pg.time.Clock()
+width, height = screen.get_size()
+width_2, height_2 = width // 4, height // 6
+
+# --- FUNCTION TO SCALE IMAGE TO FULLSCREEN ---
+def transform(transf):
+    return pg.transform.scale(transf, (width, height))
+
+def transform_choose(transf, num):
+    transf_rect = transf.get_rect()
+    new_transf = pg.transform.smoothscale(transf, (transf_rect.width // num, transf_rect.height // num))
+    return new_transf
+    
+    
+
+#--- FUNCTION TO TEST WHETHER THERE SHOULD BE A BUTTON OR NOT ---
+
+def temp_test(temp, mouse_pos):
+    if temp!= None:
+        confirm.Update()
+        confirm.Col_Update(mouse_pos)
+
+# --------------------
+#     BUTTON CLASS
+# --------------------
+class Button():
+    def __init__(self, text_i, x_pos, y_pos, colour, colour2, size):
+        self.text_i = text_i
+        self.x_pos = x_pos
+        self.y_pos = y_pos
+        self.colour = colour
+        self.colour2 = colour2
+        self.size = size
+
+        self.font = pg.font.SysFont('Cambria', self.size)
+        self.text_surf = self.font.render(text_i, True, self.colour)
+        self.text_rect = self.text_surf.get_rect(center=(x_pos, y_pos))
+
+    def Update(self):
+        screen.blit(self.text_surf, self.text_rect)
+
+    def Pos_Check(self, position):
+        return self.text_rect.collidepoint(position)
+
+    def Col_Update(self, position):
+        if self.Pos_Check(position):
+            self.text_surf = self.font.render(self.text_i, True, self.colour2)
+        else:
+            self.text_surf = self.font.render(self.text_i, True, self.colour)
+
+
+# --------------------
+#  IMAGE BUTTON CLASS
+# --------------------
+class Image_Button():
+    def __init__(self, image, x_pos, y_pos):
+        self.x_pos = x_pos
+        self.y_pos = y_pos
+
+        # Original image
+        self.image_normal = image
+
+        # Start state
+        self.image = self.image_normal
+        self.rect = self.image.get_rect(center=(x_pos, y_pos))
+
+        # scaled image
+        self.scaled_image = pg.transform.scale(self.image_normal,(self.rect.width * 0.75, self.rect.height * 0.75))
+
+    def Pos_check(self, pos):
+        return self.rect.collidepoint(pos)
+
+    def Update(self, mouse_pos):
+
+        self.rect = self.image.get_rect(center=(self.x_pos, self.y_pos))
+        self.image = self.image_normal
+
+        if self.Pos_check(mouse_pos):
+            self.image = self.scaled_image
+
+        # Update rect to match current image size
+        self.rect = self.image.get_rect(center=(self.x_pos, self.y_pos))
+
+        screen.blit(self.image, self.rect)
+#     LOAD IMAGES
+# --------------------
+
+# --- MAIN MENU BACKGROUNDS ---
+c1_bg = transform(pg.image.load("TEAM PROJECT/RESOURCES/FIGHTER_GAME/menu_backgrounds/craftpix-net-558275-free-sky-with-clouds-background-pixel-art-set/Clouds/Clouds 1/1.png").convert_alpha())
+c2_bg = transform(pg.image.load("TEAM PROJECT/RESOURCES/FIGHTER_GAME/menu_backgrounds/craftpix-net-558275-free-sky-with-clouds-background-pixel-art-set/Clouds/Clouds 1/2.png").convert_alpha())
+c4_bg = transform(pg.image.load("TEAM PROJECT/RESOURCES/FIGHTER_GAME/menu_backgrounds/craftpix-net-558275-free-sky-with-clouds-background-pixel-art-set/Clouds/Clouds 1/4.png").convert_alpha())
+
+# --- SPRITE IMAGES ---
+pink_mon = pg.image.load("TEAM PROJECT/RESOURCES/FIGHTER_GAME/sprites/1 Pink_Monster/Pink_Monster.png").convert_alpha()
+pink_mon_rect = pink_mon.get_rect()
+pink_mon = pg.transform.scale(pink_mon, (pink_mon_rect.width * (height_2 // pink_mon_rect.width) , pink_mon_rect.width * (height_2 // pink_mon_rect.width)))
+pink_mon_button = Image_Button(pink_mon, width * 0.2, height * 0.3)
+
+owlet_mon = pg.image.load('TEAM PROJECT/RESOURCES/FIGHTER_GAME/sprites/2 Owlet_Monster/Owlet_Monster.png').convert_alpha()
+owlet_mon_rect = owlet_mon.get_rect()
+owlet_mon = pg.transform.scale(owlet_mon, (owlet_mon_rect.width * (height_2 // owlet_mon_rect.width) , owlet_mon_rect.width * (height_2 // owlet_mon_rect.width)))
+owlet_button = Image_Button(owlet_mon, width * 0.2, height // 2)
+
+dude_mon = pg.image.load('TEAM PROJECT/RESOURCES/FIGHTER_GAME/sprites/3 Dude_Monster/Dude_Monster.png').convert_alpha()
+dude_mon_rect = dude_mon.get_rect()
+dude_mon = pg.transform.scale(dude_mon, (dude_mon_rect.width * (height_2 // dude_mon_rect.width) , dude_mon_rect.width * (height_2 // dude_mon_rect.width)))
+dude_button = Image_Button(dude_mon, width * 0.2, height * 0.7)
+
+chars = [pink_mon_button, owlet_button, dude_button]
+
+# --- MAIN GAME BACKGROUNDS --- 
+
+bam_bridge = pg.image.load('TEAM PROJECT/RESOURCES/FIGHTER_GAME/game_backgrounds/1/bamboo bridge.png').convert_alpha()
+bam_bridge = transform_choose(bam_bridge, 17)
+bam_bridge_button = Image_Button(bam_bridge, width * 0.2, height * (5/6))
+
+
+for_bridge = pg.image.load('TEAM PROJECT/RESOURCES/FIGHTER_GAME/game_backgrounds/2/forest bridge.png').convert_alpha()
+for_bridge = transform_choose(for_bridge, 17)
+for_bridge_button = Image_Button(for_bridge, width * 0.4, height * (5/6))
+
+sky_bridge = pg.image.load('TEAM PROJECT/RESOURCES/FIGHTER_GAME/game_backgrounds/3/sky bridge.png').convert_alpha()
+sky_bridge = transform_choose(sky_bridge, 17)
+sky_bridge_button = Image_Button(sky_bridge, width * 0.6, height * (5/6))
+
+cas_bridge = pg.image.load('TEAM PROJECT/RESOURCES/FIGHTER_GAME/game_backgrounds/4/castle bridge.png').convert_alpha()
+cas_bridge = transform_choose(cas_bridge, 17)
+cas_bridge_button = Image_Button(cas_bridge, width * 0.8 , height * (5/6))
+
+background_map = [bam_bridge_button, for_bridge_button, sky_bridge_button, cas_bridge_button]
+back_ground_map = None
+
+# ----- STORING -----
+
+player_1_char = None
+player_2_char = None
+
+Gbg = pg.draw.rect(screen, (87, 86, 86), (width * 0.1, height // 8, 100, 1000, ), 0)
+
+# --------------------
+#     GLOBAL BUTTONS
+# --------------------
+start = Button("START", width // 2, int(height * 0.75), (255,195,77), (230,153,0), 150)
+leave = Button("BACK", int(width * 0.05), int(height * 0.05), (204,41,0), (153,31,0), 50)
+confirm = Button("CONFIRM", width * 0.90, height * 0.9, (111, 207, 87), (77, 143, 60), 50)
+go = Button('GO', width // 2, height * 0.6, (201, 24, 24), (117, 14, 14), 45)
+
+
+
+# --------------------
+#      MAIN MENU
+# --------------------
+def main_menu():
+    while True:
+        screen.blit(c1_bg, (0,0))
+        screen.blit(c2_bg, (0,0))
+        screen.blit(c4_bg, (0,0))
+        mouse_pos = pg.mouse.get_pos()
+
+        for event in pg.event.get():
+            if event.type == pg.QUIT:
+                pg.quit()
+                sys.exit()
+
+            if event.type == pg.MOUSEBUTTONDOWN:
+                if leave.Pos_Check(mouse_pos):
+                    pg.quit()
+                    sys.exit()
+                elif start.Pos_Check(mouse_pos):
+                    player_select()
+        
+                
+        start.Update()
+        leave.Update()
+        start.Col_Update(mouse_pos)
+        leave.Col_Update(mouse_pos)
+
+        pg.display.update()
+        clock.tick(60)
+
+# --------------------
+#     PLAYER SELECT
+# --------------------
+def player_select():
+
+    PS_text = 'P1 SELECT CHARACTER'
+    x = True
+    temp = None
+    player_now = 1
+
+    while True:
+        global player_1_char
+        global player_2_char
+
+        player_text1 = pg.font.Font(None, 75)
+        player_text1_real = player_text1.render(str(PS_text), False, (201, 24, 24))
+        player_text1_rect = player_text1_real.get_rect(center = (width // 2, height * 0.2))
+
+        screen.blit(c1_bg, (0,0))
+        screen.blit(c2_bg, (0,0))
+        screen.blit(c4_bg, (0,0))
+        Gbg = pg.draw.rect(screen, (163, 162, 162), (width * 0.1455, height * 0.225, width * (200/1920), height * (600/1080) + (height // 80), ), 0, 50) # last element of bracket = height
+        screen.blit(player_text1_real, player_text1_rect)
+
+        
+        mouse_pos = pg.mouse.get_pos()
+
+        for event in pg.event.get():
+            if event.type == pg.QUIT:
+                pg.quit()
+                sys.exit()
+
+            if event.type == pg.MOUSEBUTTONDOWN:
+
+                if leave.Pos_Check(mouse_pos):
+                    return  # go back to main menu
+                
+                for char in chars:
+                    if char.Pos_check(mouse_pos):
+                        temp = char.image
+                        
+                if confirm.Pos_Check(mouse_pos) and temp != None:
+
+                    if player_now == 1:
+                        player_1_char = temp
+                        temp = None
+                        player_now = 2
+                        PS_text = 'PLAYER 2 SELECT YOUR CHARACTER'
+                        
+
+                    elif player_now == 2:
+                        
+                        if temp == player_1_char:
+                            PS_text = 'ALREADY SELECTED TRY AGAIN'
+                            temp = None
+                            
+
+                        else:
+                            player_2_char = temp
+                            temp = None
+                            PS_text = 'READY TO FIGHT?'
+
+                if go.Pos_Check(mouse_pos):
+                    background()
+
+
+
+        if PS_text == 'READY TO FIGHT?':
+            go.Update()
+            go.Col_Update(mouse_pos)
+
+
+        temp_test(temp, mouse_pos)      
+
+        pink_mon_button.Update(mouse_pos)
+        owlet_button.Update(mouse_pos)
+        dude_button.Update(mouse_pos)          
+
+        leave.Col_Update(mouse_pos)
+        leave.Update()
+
+
+
+        pg.display.update()
+        clock.tick(60)
+
+def background():
+
+    bgs_text = 'SELECT BACKGROUND'
+    global back_ground_map
+    temp_2 = None
+
+    while True:
+
+        screen.blit(c1_bg, (0,0))
+        screen.blit(c2_bg, (0,0))
+        screen.blit(c4_bg, (0,0))
+
+        mouse_pos = pg.mouse.get_pos()
+        
+        bg_select = pg.font.Font(None, 75)
+        bg_select_text = bg_select.render(str(bgs_text), False, (201, 24, 24))
+        bg_select_rect = bg_select_text.get_rect(center = (width // 2, height * 0.2))
+
+        screen.blit(bg_select_text, bg_select_rect)
+        
+        for event in pg.event.get():
+
+            if event.type == pg.QUIT:
+                pg.quit()
+                sys.exit()
+            
+            if event.type == pg.MOUSEBUTTONDOWN:
+
+                if leave.Pos_Check(mouse_pos):
+                    return
+                
+                for bg in background_map:
+                    if bg.Pos_check(mouse_pos):
+                        temp_2 = bg.image
+
+                if confirm.Pos_Check(mouse_pos) and temp_2 != None:
+                    back_ground_map = temp_2
+                    bgs_text = 'READY TO FIGHT'
+
+            if go.Pos_Check(mouse_pos):
+                print('PLAYTIME')
+
+
+    
+
+        if bgs_text == 'READY TO FIGHT':
+            go.x_pos = width // 2
+            go.y_pos = height * (0.1)
+            go.text_rect.center = (go.x_pos, go.y_pos)
+
+            go.Update()
+            go.Col_Update(mouse_pos)
+
+        if temp_2 != None:
+            preview = transform_choose(temp_2, 0.3)
+            preview_rect = preview.get_rect(center = (width // 2, height // 2))
+            screen.blit(preview, preview_rect )       
+
+
+        leave.Col_Update(mouse_pos)
+        leave.Update()
+
+        confirm.Update()
+        confirm.Col_Update(mouse_pos)
+
+        bam_bridge_button.Update(mouse_pos)
+        for_bridge_button.Update(mouse_pos)
+        sky_bridge_button.Update(mouse_pos)
+        cas_bridge_button.Update(mouse_pos)
+
+        pg.display.update()
+        clock.tick(60)
+
+
+
+
+# --------------------
+#    START GAME
+# --------------------
+main_menu()
