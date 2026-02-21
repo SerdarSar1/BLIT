@@ -1,0 +1,4983 @@
+import pygame as pg
+import random as r
+import math
+import os
+import sys
+import socket, threading, json, time, copy
+
+# ---------------- ONLINE GLOBALS ----------------
+GAME_MODE = "local"      # "local" or "online"
+ONLINE_ROLE = None       # "host" or "join"
+JOIN_IP = None
+ONLINE_PORT = 5000
+MAX_PACKET = 8192
+SELECTED_BG_INDEX = 0
+
+import pygame as pg
+import random as r
+import math
+import os
+import sys
+import socket, threading, json, time, copy
+
+# ---------------- ONLINE GLOBALS ----------------
+GAME_MODE = "local"      # "local" or "online"
+ONLINE_ROLE = None       # "host" or "join"
+JOIN_IP = None
+ONLINE_PORT = 5000
+MAX_PACKET = 8192
+
+def get_lan_ip():
+    """
+    Best-effort LAN IP (the one your friend on the same Wi-Fi can use).
+    """
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+
+def draw_host_ip_overlay():
+    ip_font = pg.font.SysFont("Arial", 28, bold=True)
+    host_ip = get_lan_ip()
+    ip_txt = ip_font.render(f"Host IP: {host_ip}:{ONLINE_PORT}", True, (255,255,255))
+    screen.blit(ip_txt, (20, height - 40))
+
+def encode(obj: dict) -> bytes:
+    return json.dumps(obj, separators=(",", ":")).encode("utf-8")
+
+def decode(data: bytes) -> dict:
+    try:
+        return json.loads(data.decode("utf-8"))
+    except Exception:
+        return {}
+pg.init()
+
+PLAYER1_COLOR = (255, 0, 0)
+PLAYER2_COLOR = (0, 0, 255)
+def load_animation(path, frame_count):
+    sheet = pg.image.load(path).convert_alpha()
+    sheet_width, sheet_height = sheet.get_size()
+    frame_width = sheet_width // frame_count
+
+    frames = []
+    for i in range(frame_count):
+        frame = sheet.subsurface(pg.Rect(i * frame_width, 0, frame_width, sheet_height))
+        frame = pg.transform.scale(frame, (PLAYER_WIDTH, PLAYER_HEIGHT))
+        frames.append(frame)
+
+    return frames
+
+# --- SCREEN SETUP ---
+screen = pg.display.set_mode((0,0), pg.FULLSCREEN)
+pg.display.set_caption(':D')
+clock = pg.time.Clock()
+width, height = screen.get_size()
+PLAYER_WIDTH = int(width * 0.12)
+PLAYER_HEIGHT = int(height * 0.28)
+width_2, height_2 = width // 4, height // 6
+
+# --- FUNCTION TO SCALE IMAGE TO FULLSCREEN ---
+def transform(transf):
+    return pg.transform.scale(transf, (width, height))
+
+def transform_choose(transf, num):
+    transf_rect = transf.get_rect()
+    new_transf = pg.transform.smoothscale(transf, (transf_rect.width // num, transf_rect.height // num))
+    return new_transf
+    #--- FUNCTION TO TEST WHETHER THERE SHOULD BE A BUTTON OR NOT ---
+def draw_text_box(text, x, y, max_width, font, color, line_spacing=6):
+    words = str(text).split(" ")
+    line = ""
+    y_offset = 0
+
+    for word in words:
+        test_line = (line + word + " ").strip()
+        if font.size(test_line)[0] <= max_width:
+            line = test_line + " "
+        else:
+            surf = font.render(line.strip(), True, color)
+            screen.blit(surf, (x, y + y_offset))
+            y_offset += font.get_height() + line_spacing
+            line = word + " "
+
+    if line.strip():
+        surf = font.render(line.strip(), True, color)
+        screen.blit(surf, (x, y + y_offset))
+
+# --------------------
+#     BUTTON CLASS
+# --------------------
+class Button():
+    
+    def __init__(self, text_i, x_pos, y_pos, colour, colour2, size):
+        self.text_i = text_i
+        self.x_pos = x_pos
+        self.y_pos = y_pos
+        self.colour = colour
+        self.colour2 = colour2
+        self.size = size
+
+        self.font = pg.font.SysFont('Cambria', self.size)
+        self.text_surf = self.font.render(text_i, True, self.colour)
+        self.text_rect = self.text_surf.get_rect(center=(x_pos, y_pos))
+
+    def Update(self):
+        self.text_rect.center = (self.x_pos, self.y_pos)
+        screen.blit(self.text_surf, self.text_rect)
+
+    def Pos_Check(self, position):
+        return self.text_rect.collidepoint(position)
+
+    def Col_Update(self, position):
+        if self.Pos_Check(position):
+            self.text_surf = self.font.render(self.text_i, True, self.colour2)
+        else:
+            self.text_surf = self.font.render(self.text_i, True, self.colour)
+        # also resync rect because text size can change slightly
+        self.text_rect = self.text_surf.get_rect(center=(self.x_pos, self.y_pos))
+# --------------------
+#  IMAGE BUTTON CLASS
+# --------------------
+class Image_Button():
+    def __init__(self, image, x_pos, y_pos, hover_scale=0.9):
+        self.x_pos = x_pos
+        self.y_pos = y_pos
+
+        self.image_normal = image
+        self.full_image = image  # optional (you override for backgrounds)
+
+        # Hover image (smaller)
+        w, h = self.image_normal.get_size()
+        self.image_hover = pg.transform.smoothscale(
+            self.image_normal,
+            (int(w * hover_scale), int(h * hover_scale))
+        )
+
+        # IMPORTANT: hitbox stays the same size always (normal image size)
+        self.hit_rect = self.image_normal.get_rect(center=(x_pos, y_pos))
+
+    def Pos_check(self, pos):
+        return self.hit_rect.collidepoint(pos)
+
+    def Update(self, mouse_pos):
+        hovering = self.Pos_check(mouse_pos)
+        img = self.image_hover if hovering else self.image_normal
+
+        draw_rect = img.get_rect(center=(self.x_pos, self.y_pos))
+        screen.blit(img, draw_rect)
+
+        # keep hitbox centered if x/y changes
+        self.hit_rect.center = (self.x_pos, self.y_pos)
+# --------------------
+def draw_bars(surface, width, height, player1, player2):
+    bar_height = 0.05 * height
+    seg_width = width * 0.03
+    special_segments = 3
+    block_bar_height = bar_height / 2
+    spacing = 5
+        
+    pg.draw.rect(surface, (60, 60, 60), (0, 0, width * 0.35, bar_height))
+    pg.draw.rect(surface, (230, 230, 230), (0, 0, (width*0.35) * (player1.display_health/player1.max_health), bar_height))
+    color_hp1 = PLAYER1_COLOR if player1.health/player1.max_health >= 0.3 else (255, 80, 80)
+    pg.draw.rect(surface, color_hp1, (0, 0, (width*0.35) * (player1.health/player1.max_health), bar_height))
+
+    bar_y_special = bar_height + spacing
+    special_bar_width = seg_width * special_segments
+    bar_x = 0
+    pg.draw.rect(surface, (50,0,50), (bar_x, bar_y_special, special_bar_width, bar_height))
+    filled_width = special_bar_width * (player1.special_attack/player1.max_special)
+    pg.draw.rect(surface, PLAYER1_COLOR, (bar_x, bar_y_special, filled_width, bar_height))
+    for j in range(1, special_segments):
+        line_x = bar_x + j * seg_width
+        pg.draw.line(surface, (255,255,255), (line_x, bar_y_special), (line_x, bar_y_special+bar_height), 2)
+
+    bar_y_block = bar_y_special + bar_height + spacing
+    block_bar_width = seg_width * 3
+    bar_x = 0
+    pg.draw.rect(surface, (20,20,70), (bar_x, bar_y_block, block_bar_width, block_bar_height))
+    filled_width = block_bar_width * (player1.block_stamina/player1.max_block_stamina)
+    pg.draw.rect(surface, (0,200,255), (bar_x, bar_y_block, filled_width, block_bar_height))
+
+    bar_width_p2 = width * 0.35
+    pg.draw.rect(surface, (60,60,60), (width - bar_width_p2, 0, bar_width_p2, bar_height))
+    chip_width = bar_width_p2 * (player2.display_health/player2.max_health)
+    pg.draw.rect(surface, (230,230,230), (width - bar_width_p2 + bar_width_p2 - chip_width, 0, chip_width, bar_height))
+    real_width = bar_width_p2 * (player2.health/player2.max_health)
+    color_hp2 = PLAYER2_COLOR if player2.health/player2.max_health >= 0.3 else (255,80,80)
+    pg.draw.rect(surface, color_hp2, (width - bar_width_p2 + bar_width_p2 - real_width, 0, real_width, bar_height))
+
+    bar_y_special = bar_height + spacing
+    special_bar_width = seg_width * special_segments
+    bar_x = width - special_bar_width
+    pg.draw.rect(surface, (50,0,50), (bar_x, bar_y_special, special_bar_width, bar_height))
+    filled_width = special_bar_width * (player2.special_attack/player2.max_special)
+    pg.draw.rect(surface, PLAYER2_COLOR, (bar_x + special_bar_width - filled_width, bar_y_special, filled_width, bar_height))
+    for j in range(1, special_segments):
+        line_x = bar_x + j * seg_width
+        pg.draw.line(surface, (255,255,255), (line_x, bar_y_special), (line_x, bar_y_special+bar_height), 2)
+
+    bar_y_block = bar_y_special + bar_height + spacing
+    block_bar_width = seg_width * 3
+    bar_x = width - block_bar_width
+    pg.draw.rect(surface, (20,20,70), (bar_x, bar_y_block, block_bar_width, block_bar_height))
+    filled_width = block_bar_width * (player2.block_stamina/player2.max_block_stamina)
+    pg.draw.rect(surface, (0,200,255), (bar_x + block_bar_width - filled_width, bar_y_block, filled_width, block_bar_height))
+
+# --- MAIN MENU BACKGROUNDS ---
+c1_bg = transform(pg.image.load("C:/Users/saira/OneDrive/Desktop/Python projects/Fighter game//RESOURCES/FIGHTER_GAME/menu_backgrounds/craftpix-net-558275-free-sky-with-clouds-background-pixel-art-set/Clouds/Clouds 1/1.png").convert_alpha())
+c2_bg = transform(pg.image.load("C:/Users/saira/OneDrive/Desktop/Python projects/Fighter game//RESOURCES/FIGHTER_GAME/menu_backgrounds/craftpix-net-558275-free-sky-with-clouds-background-pixel-art-set/Clouds/Clouds 1/2.png").convert_alpha())
+c4_bg = transform(pg.image.load("C:/Users/saira/OneDrive/Desktop/Python projects/Fighter game//RESOURCES/FIGHTER_GAME/menu_backgrounds/craftpix-net-558275-free-sky-with-clouds-background-pixel-art-set/Clouds/Clouds 1/4.png").convert_alpha())
+
+# --- SPRITE IMAGES ---
+pink_path = "C:/Users/saira/OneDrive/Desktop/Python projects/Fighter game/RESOURCES/FIGHTER_GAME/sprites/1 Pink_Monster/"
+
+pink_animations = {
+    "idle": load_animation(pink_path + "Pink_Monster_Idle_4.png", 4),
+    "run": load_animation(pink_path + "Pink_Monster_Run_6.png", 6),
+    "walk": load_animation(pink_path + "Pink_Monster_Walk_6.png", 6),
+    "jump": load_animation(pink_path + "Pink_Monster_Jump_8.png", 8),
+    "double_jump": load_animation(pink_path + "Double_Jump_Dust_5.png", 5),
+    "attack1": load_animation(pink_path + "Pink_Monster_Attack1_4.png", 4),
+    "attack2": load_animation(pink_path + "Pink_Monster_Attack2_6.png", 6),
+    "hurt": load_animation(pink_path + "Pink_Monster_Hurt_4.png", 4),
+    "death": load_animation(pink_path + "Pink_Monster_Death_8.png", 8),
+    "climb": load_animation(pink_path + "Pink_Monster_Climb_4.png", 4),
+}
+
+owl_path = "C:/Users/saira/OneDrive/Desktop/Python projects/Fighter game/RESOURCES/FIGHTER_GAME/sprites/2 Owlet_Monster/"
+
+owl_animations = {
+    "idle": load_animation(owl_path + "Owlet_Monster_Idle_4.png", 4),
+    "run": load_animation(owl_path + "Owlet_Monster_Run_6.png", 6),
+    "walk": load_animation(owl_path + "Owlet_Monster_Walk_6.png", 6),
+    "jump": load_animation(owl_path + "Owlet_Monster_Jump_8.png", 8),
+    "double_jump": load_animation(owl_path + "Double_Jump_Dust_5.png", 5),
+    "attack1": load_animation(owl_path + "Owlet_Monster_Attack1_4.png", 4),
+    "attack2": load_animation(owl_path + "Owlet_Monster_Attack2_6.png", 6),
+    "hurt": load_animation(owl_path + "Owlet_Monster_Hurt_4.png", 4),
+    "death": load_animation(owl_path + "Owlet_Monster_Death_8.png", 8),
+    "climb": load_animation(owl_path + "Owlet_Monster_Climb_4.png", 4),
+}
+Dude_path = "C:/Users/saira/OneDrive/Desktop/Python projects/Fighter game/RESOURCES/FIGHTER_GAME/sprites/3 Dude_Monster/"
+
+Dude_animations = {
+    "idle": load_animation(Dude_path + "Dude_Monster_Idle_4.png", 4),
+    "run": load_animation(Dude_path + "Dude_Monster_Run_6.png", 6),
+    "walk": load_animation(Dude_path + "Dude_Monster_Walk_6.png", 6),
+    "jump": load_animation(Dude_path + "Dude_Monster_Jump_8.png", 8),
+    "double_jump": load_animation(Dude_path + "Double_Jump_Dust_5.png", 5),
+    "attack1": load_animation(Dude_path + "Dude_Monster_Attack1_4.png", 4),
+    "attack2": load_animation(Dude_path + "Dude_Monster_Attack2_6.png", 6),
+    "hurt": load_animation(Dude_path + "Dude_Monster_Hurt_4.png", 4),
+    "death": load_animation(Dude_path + "Dude_Monster_Death_8.png", 8),
+    "climb": load_animation(Dude_path + "Dude_Monster_Climb_4.png", 4),
+}
+
+character_info = {
+    "Pink_Monster": {
+        "name": "Pink Monster",
+        "bio": "A strong but slow fighter with crushing attacks and high defense."
+    },
+    "Owl_Monster": {
+        "name": "Owlet",
+        "bio": "Fast and agile fighter. Specialises in aerial attacks."
+    },
+    "Dude_Monster": {
+        "name": "Dude",
+        "bio": "Balanced warrior with reliable combos and good mobility."
+    }
+}
+CHAR_SPECIAL = {
+    "Pink_Monster": "shockwave",
+    "Owl_Monster": "dash",
+    "Dude_Monster": "heal",
+    # if you add a 4th/5th character later:
+    # "SomeCharacter": "heal",
+    # "SomeOther": "joker",
+}
+pink_preview = pink_animations["idle"][0]
+owl_preview = owl_animations["idle"][0]
+dude_preview = Dude_animations["idle"][0]
+
+button_y = int(height * 0.55)
+spacing = int(width * 0.15)
+
+def make_preview_smaller(img, scale=0.75):
+    w, h = img.get_size()
+    return pg.transform.smoothscale(img, (int(w*scale), int(h*scale)))
+
+pink_mon_button = Image_Button(make_preview_smaller(pink_preview, 0.75), spacing * 1.5, button_y)
+owlet_button = Image_Button(make_preview_smaller(owl_preview, 0.75), spacing * 3, button_y)
+dude_button = Image_Button(make_preview_smaller(dude_preview, 0.75), spacing * 4.5, button_y)
+
+
+chars = [pink_mon_button, owlet_button, dude_button]
+
+
+# --- MAIN GAME BACKGROUNDS --- 
+
+bam_bridge_full = pg.image.load('C:/Users/saira/OneDrive/Desktop/Python projects/Fighter game/RESOURCES/FIGHTER_GAME/game_backgrounds/1/bamboo bridge.png').convert_alpha()
+bam_bridge = transform_choose(bam_bridge_full, 17)
+bam_bridge_button = Image_Button(bam_bridge, width * 0.28, height * (0.85))
+bam_bridge_button.full_image = bam_bridge_full
+
+for_bridge_full = pg.image.load('C:/Users/saira/OneDrive/Desktop/Python projects/Fighter game/RESOURCES/FIGHTER_GAME/game_backgrounds/2/forest bridge.png').convert_alpha()
+for_bridge = transform_choose(for_bridge_full, 17)
+for_bridge_button = Image_Button(for_bridge, width * 0.44, height * (0.85))
+for_bridge_button.full_image = for_bridge_full
+
+sky_bridge_full = pg.image.load('C:/Users/saira/OneDrive/Desktop/Python projects/Fighter game/RESOURCES/FIGHTER_GAME/game_backgrounds/3/sky bridge.png').convert_alpha()
+sky_bridge = transform_choose(sky_bridge_full, 17)
+sky_bridge_button = Image_Button(sky_bridge, width * 0.60, height * (0.85))
+sky_bridge_button.full_image = sky_bridge_full
+
+cas_bridge_full = pg.image.load('C:/Users/saira/OneDrive/Desktop/Python projects/Fighter game/RESOURCES/FIGHTER_GAME/game_backgrounds/4/castle bridge.png').convert_alpha()
+cas_bridge = transform_choose(cas_bridge_full, 17)
+cas_bridge_button = Image_Button(cas_bridge, width * 0.76 , height * (0.85))
+cas_bridge_button.full_image = cas_bridge_full
+
+background_map = [bam_bridge_button, for_bridge_button, sky_bridge_button, cas_bridge_button]
+back_ground_map = None
+# ----- STORING -----
+BG_FULL_LIST = [
+    transform(bam_bridge_full),
+    transform(for_bridge_full),
+    transform(sky_bridge_full),
+    transform(cas_bridge_full),
+]
+player_1_char = None
+player_2_char = None
+
+
+# --------------------
+#     GLOBAL BUTTONS
+# --------------------
+start = Button("START", width // 2, int(height * 0.75), (255,195,77), (230,153,0), 150)
+leave = Button("BACK", int(width * 0.05), int(height * 0.05), (204,41,0), (153,31,0), 50)
+confirm = Button("CONFIRM", width * 0.90, height * 0.9, (111, 207, 87), (77, 143, 60), 50)
+go = Button('GO', int(width*0.8), int(height*0.75), (201,24,24), (117,14,14), 50)# --------------------
+
+def scale_to_fit(img, max_w, max_h):
+    w, h = img.get_size()
+    scale = min(max_w / w, max_h / h)
+    new_size = (int(w * scale), int(h * scale))
+    return pg.transform.smoothscale(img, new_size)
+def online_menu():
+    host_btn = Button("HOST", width//2, int(height*0.48), (255,195,77), (230,153,0), 140)
+    join_btn = Button("JOIN", width//2, int(height*0.65), (255,195,77), (230,153,0), 140)
+
+    title_font = pg.font.Font(None, 110)
+
+    while True:
+        screen.blit(c1_bg, (0,0)); screen.blit(c2_bg, (0,0)); screen.blit(c4_bg, (0,0))
+        mouse_pos = pg.mouse.get_pos()
+
+        title = title_font.render("ONLINE", True, (201,24,24))
+        screen.blit(title, title.get_rect(center=(width//2, int(height*0.18))))
+
+        for event in pg.event.get():
+            if event.type == pg.QUIT:
+                pg.quit(); sys.exit()
+            if event.type == pg.MOUSEBUTTONDOWN:
+                if leave.Pos_Check(mouse_pos):
+                    return
+                if host_btn.Pos_Check(mouse_pos):
+                    # Host chooses ONLY their own character + map
+                    host_char = player_select_single(1)
+                    if host_char is None:
+                        return
+                    global player_1_char
+                    player_1_char = host_char
+                    background()   # when GO pressed it will call run_online_host(...)
+                    return
+                if join_btn.Pos_Check(mouse_pos):
+                    ip_entry_screen() # joiner needs host IP
+                    return
+
+        host_btn.Update(); host_btn.Col_Update(mouse_pos)
+        join_btn.Update(); join_btn.Col_Update(mouse_pos)
+        leave.Update(); leave.Col_Update(mouse_pos)
+
+        ip_font = pg.font.Font(None, 40)
+        host_ip = get_lan_ip()
+        ip_text = ip_font.render(f"Host IP: {host_ip}:{ONLINE_PORT}", True, (255,255,255))
+        screen.blit(ip_text, (int(width*0.03), int(height*0.92)))
+
+        pg.display.update()
+        clock.tick(60)
+def mode_select():
+    global GAME_MODE, ONLINE_ROLE
+    GAME_MODE = "local"
+    ONLINE_ROLE = None
+
+    local_btn = Button("LOCAL", width//2, int(height*0.48), (255,195,77), (230,153,0), 140)
+    online_btn = Button("ONLINE", width//2, int(height*0.65), (255,195,77), (230,153,0), 140)
+    title_font = pg.font.Font(None, 110)
+
+    while True:
+        screen.blit(c1_bg, (0,0)); screen.blit(c2_bg, (0,0)); screen.blit(c4_bg, (0,0))
+        mouse_pos = pg.mouse.get_pos()
+
+        title = title_font.render("CHOOSE MODE", True, (201,24,24))
+        screen.blit(title, title.get_rect(center=(width//2, int(height*0.18))))
+
+        for event in pg.event.get():
+            if event.type == pg.QUIT:
+                pg.quit(); sys.exit()
+            if event.type == pg.MOUSEBUTTONDOWN:
+                if leave.Pos_Check(mouse_pos):
+                    return
+                if local_btn.Pos_Check(mouse_pos):
+                    GAME_MODE = "local"
+                    ONLINE_ROLE = None
+                    player_select()
+                    return
+                if online_btn.Pos_Check(mouse_pos):
+                    GAME_MODE = "online"
+                    online_menu()
+                    return
+
+        local_btn.Update(); local_btn.Col_Update(mouse_pos)
+        online_btn.Update(); online_btn.Col_Update(mouse_pos)
+        leave.Update(); leave.Col_Update(mouse_pos)
+        pg.display.update()
+        clock.tick(60)
+
+
+def ip_entry_screen():
+    
+    global JOIN_IP
+    ip = ""
+    font = pg.font.Font(None, 70)
+    small = pg.font.Font(None, 40)
+    connect_btn = Button("CONNECT", width//2, int(height*0.72), (111,207,87), (77,143,60), 80)
+
+    global player_2_char
+    if player_2_char is None:
+        pick = player_select_single(2)
+        if pick is None:
+            return
+        player_2_char = pick
+    while True:
+        mouse_pos = pg.mouse.get_pos()
+        screen.blit(c1_bg, (0,0))
+        screen.blit(c2_bg, (0,0))
+        screen.blit(c4_bg, (0,0))
+
+        # ---- GREY PANEL ----
+        panel_w = int(width * 0.6)
+        panel_h = int(height * 0.4)
+        panel_x = width // 2 - panel_w // 2
+        panel_y = height // 2 - panel_h // 2
+
+        # Semi-transparent surface
+        panel_surface = pg.Surface((panel_w, panel_h), pg.SRCALPHA)
+        panel_surface.fill((40, 40, 40, 220))  # dark grey with transparency
+        screen.blit(panel_surface, (panel_x, panel_y))
+
+        # Border
+        pg.draw.rect(screen, (220,220,220), (panel_x, panel_y, panel_w, panel_h), 3, border_radius=20)
+
+        # ---- TEXT ----
+        label = font.render("ENTER HOST IP", True, (201,24,24))
+        screen.blit(label, label.get_rect(center=(width//2, panel_y + 70)))
+
+        # Input text
+        ip_display = ip if ip else "_"
+        ip_surf = font.render(ip_display, True, (255,255,255))
+        screen.blit(ip_surf, ip_surf.get_rect(center=(width//2, panel_y + 150)))
+
+        # Hint text
+        hint = small.render("Example: 192.168.1.23", True, (200,200,200))
+        screen.blit(hint, hint.get_rect(center=(width//2, panel_y + 220)))
+
+        for event in pg.event.get():
+            if event.type == pg.QUIT:
+                pg.quit(); sys.exit()
+            if event.type == pg.KEYDOWN:
+                if event.key == pg.K_BACKSPACE:
+                    ip = ip[:-1]
+                elif event.key == pg.K_RETURN and ip:
+                    JOIN_IP = ip
+                    run_online_client(JOIN_IP, player_id=2, chosen_char=player_2_char)  
+                    return
+                else:
+                    ch = event.unicode
+                    if ch.isdigit() or ch == ".":
+                        ip += ch
+
+            if event.type == pg.MOUSEBUTTONDOWN:
+                if leave.Pos_Check(mouse_pos):
+                    return
+
+                if connect_btn.Pos_Check(mouse_pos) and ip:
+                    JOIN_IP = ip
+                    run_online_client(JOIN_IP, player_id=2, chosen_char=player_2_char)
+                    return
+
+        connect_btn.Update(); connect_btn.Col_Update(mouse_pos)
+        leave.Update(); leave.Col_Update(mouse_pos)
+        pg.display.update()
+        clock.tick(60)
+def main_menu():
+    while True:
+        screen.blit(c1_bg, (0,0))
+        screen.blit(c2_bg, (0,0))
+        screen.blit(c4_bg, (0,0))
+        mouse_pos = pg.mouse.get_pos()
+
+        for event in pg.event.get():
+            if event.type == pg.QUIT:
+                pg.quit()
+                sys.exit()
+
+            if event.type == pg.MOUSEBUTTONDOWN:
+                if leave.Pos_Check(mouse_pos):
+                    pg.quit()
+                    sys.exit()
+                elif start.Pos_Check(mouse_pos):
+                    mode_select()
+        
+                
+        start.Update()
+        leave.Update()
+        start.Col_Update(mouse_pos)
+        leave.Col_Update(mouse_pos)
+
+        pg.display.update()
+        clock.tick(60)
+
+# --------------------
+#     PLAYER SELECT
+# --------------------
+def player_select():
+    selected_for_preview = None
+    PS_text = 'P1 SELECT CHARACTER'
+    x = True
+    temp = None
+    player_now = 1
+    ready_to_fight = False
+    
+    while True:
+        global player_1_char
+        global player_2_char
+
+        player_text1 = pg.font.Font(None, 75)
+        player_text1_real = player_text1.render(str(PS_text), False, (201, 24, 24))
+        player_text1_rect = player_text1_real.get_rect(center = (width // 2, height * 0.1))
+
+        screen.blit(c1_bg, (0,0))
+        screen.blit(c2_bg, (0,0))
+        screen.blit(c4_bg, (0,0))
+        Gbg = pg.draw.rect(screen, (163, 162, 162), (width * 0.1455, height * 0.225, width * (200/1920), height * (600/1080) + (height // 80), ), 0, 50) # last element of bracket = height
+        screen.blit(player_text1_real, player_text1_rect)
+        
+        # LEFT area = character buttons
+        left_panel = pg.Rect(width*0.05, height*0.15, width*0.2, height*0.7)
+        pg.draw.rect(screen, (40,40,40), left_panel, border_radius=25)
+        # --- layout character buttons inside the left panel ---
+           # vertical position inside panel
+        # --- layout character buttons inside the left panel (VERTICAL) ---
+        count = len(chars)
+        max_h = max(btn.image_normal.get_height() for btn in chars)
+        padding = 2                 # tweak this
+        gap_y = max_h + padding
+        # Vertical spacing between sprites
+        total_height = (count - 1) * gap_y
+        start_y = left_panel.centery - total_height // 2
+       
+        for i, btn in enumerate(chars):
+            btn.x_pos = left_panel.centerx
+            btn.y_pos = start_y + i * gap_y # Stack vertically centered        # RIGHT info panel
+        panel_x = int(width * 0.30)
+        panel_y = int(height * 0.15)
+        panel_w = int(width * 0.4)
+        panel_h = int(height * 0.7)
+
+        info_panel = pg.Rect(panel_x, panel_y, panel_w, panel_h)
+        pg.draw.rect(screen, (30,30,30), info_panel, border_radius=25)
+        pg.draw.rect(screen, (200,200,200), info_panel, 3, border_radius=25)        
+        pg.draw.rect(screen, (40,40,40), info_panel, border_radius=30)     
+        
+       
+        mouse_pos = pg.mouse.get_pos()
+
+        for event in pg.event.get():
+            if event.type == pg.QUIT:
+                pg.quit()
+                sys.exit()
+
+            if event.type == pg.MOUSEBUTTONDOWN:
+
+                if leave.Pos_Check(mouse_pos):
+                    return  # go back to main menu
+                
+                for char in chars:
+                    if char.Pos_check(mouse_pos):
+                        if char == pink_mon_button:
+                            temp = "Pink_Monster"
+                        elif char == owlet_button:
+                            temp = "Owl_Monster"
+                        elif char == dude_button:
+                            temp = "Dude_Monster"
+                        
+                if confirm.Pos_Check(mouse_pos) and temp != None:
+
+                    if player_now == 1:
+                        player_1_char = temp
+                        temp = None
+                        player_now = 2
+                        PS_text = 'PLAYER 2 SELECT YOUR CHARACTER'
+                        
+
+                    elif player_now == 2:
+                        
+                        if temp == player_1_char:
+                            PS_text = 'ALREADY SELECTED TRY AGAIN'
+                            temp = None
+                            
+
+                        else:
+                            player_2_char = temp
+                            temp = None
+                            background()   # instantly go to map select
+                            return         # stop the player_select loop
+
+               
+                # draw confirm button only if a character is selected
+
+        if ready_to_fight:
+            go.x_pos = panel_x + panel_w // 2
+            go.y_pos = panel_y + panel_h - 60
+            go.text_rect.center = (go.x_pos, go.y_pos)
+        
+            go.Update()
+            go.Col_Update(mouse_pos)
+
+        # draw confirm button only if a character is selected
+        if temp is not None:
+            confirm.Update()
+            confirm.Col_Update(mouse_pos)
+
+            info = character_info[temp]
+
+            # Name
+            name_font = pg.font.Font(None, 50)
+            name_surf = name_font.render(info["name"], True, (255,255,255))
+            screen.blit(name_surf, (panel_x + 20, panel_y + 20))
+
+            # Preview image
+            if temp == "Pink_Monster":
+                preview = pink_animations["idle"][0]
+            elif temp == "Owl_Monster":
+                preview = owl_animations["idle"][0]
+            elif temp == "Dude_Monster":
+                preview = Dude_animations["idle"][0]
+
+            preview = transform_choose(preview, 2)
+            preview_rect = preview.get_rect(center=(panel_x + panel_w//2, panel_y + 200))
+            screen.blit(preview, preview_rect)
+
+            # Bio text
+            bio_font = pg.font.Font(None, 32)
+            draw_text_box(info["bio"], panel_x + 20, panel_y + 350, panel_w - 40, bio_font, (220,220,220))
+
+            special_name = CHAR_SPECIAL[temp]
+            special_font = pg.font.Font(None, 32)
+            special_surf = special_font.render(f"Special: {special_name.upper()}", True, (200, 200, 50))
+            screen.blit(special_surf, (panel_x + 20, panel_y + 310))
+
+        pink_mon_button.Update(mouse_pos)
+        owlet_button.Update(mouse_pos)
+        dude_button.Update(mouse_pos)          
+
+        leave.Col_Update(mouse_pos)
+        leave.Update()
+
+        # draw confirm button only if a character is selected
+
+        pg.display.update()
+        clock.tick(60)
+def player_select_single(player_num: int):
+    """
+    Returns a character key like "Pink_Monster" / "Owl_Monster" / "Dude_Monster"
+    player_num: 1 or 2 (just affects the text)
+    """
+    PS_text = f'P{player_num} SELECT CHARACTER'
+    temp = None
+
+    while True:
+        player_text1 = pg.font.Font(None, 75)
+        player_text1_real = player_text1.render(str(PS_text), False, (201, 24, 24))
+        player_text1_rect = player_text1_real.get_rect(center=(width // 2, height * 0.1))
+
+        screen.blit(c1_bg, (0,0)); screen.blit(c2_bg, (0,0)); screen.blit(c4_bg, (0,0))
+        screen.blit(player_text1_real, player_text1_rect)
+
+        left_panel = pg.Rect(width*0.05, height*0.15, width*0.2, height*0.7)
+        pg.draw.rect(screen, (40,40,40), left_panel, border_radius=25)
+
+        count = len(chars)
+        max_h = max(btn.image_normal.get_height() for btn in chars)
+        padding = 2
+        gap_y = max_h + padding
+        total_height = (count - 1) * gap_y
+        start_y = left_panel.centery - total_height // 2
+
+        for i, btn in enumerate(chars):
+            btn.x_pos = left_panel.centerx
+            btn.y_pos = start_y + i * gap_y
+
+        panel_x = int(width * 0.30)
+        panel_y = int(height * 0.15)
+        panel_w = int(width * 0.4)
+        panel_h = int(height * 0.7)
+
+        info_panel = pg.Rect(panel_x, panel_y, panel_w, panel_h)
+        pg.draw.rect(screen, (40,40,40), info_panel, border_radius=30)
+
+        mouse_pos = pg.mouse.get_pos()
+
+        for event in pg.event.get():
+            if event.type == pg.QUIT:
+                pg.quit(); sys.exit()
+
+            if event.type == pg.MOUSEBUTTONDOWN:
+                if leave.Pos_Check(mouse_pos):
+                    return None
+
+                for char in chars:
+                    if char.Pos_check(mouse_pos):
+                        if char == pink_mon_button: temp = "Pink_Monster"
+                        elif char == owlet_button:  temp = "Owl_Monster"
+                        elif char == dude_button:   temp = "Dude_Monster"
+
+                if confirm.Pos_Check(mouse_pos) and temp is not None:
+                    return temp
+
+        # preview + confirm
+        if temp is not None:
+            confirm.Update(); confirm.Col_Update(mouse_pos)
+            info = character_info[temp]
+
+            name_font = pg.font.Font(None, 50)
+            screen.blit(name_font.render(info["name"], True, (255,255,255)), (panel_x + 20, panel_y + 20))
+
+            if temp == "Pink_Monster": preview = pink_animations["idle"][0]
+            elif temp == "Owl_Monster": preview = owl_animations["idle"][0]
+            else: preview = Dude_animations["idle"][0]
+
+            preview = transform_choose(preview, 2)
+            preview_rect = preview.get_rect(center=(panel_x + panel_w//2, panel_y + 200))
+            screen.blit(preview, preview_rect)
+
+            bio_font = pg.font.Font(None, 32)
+            draw_text_box(info["bio"], panel_x + 20, panel_y + 350, panel_w - 40, bio_font, (220,220,220))
+
+            special_name = CHAR_SPECIAL[temp]
+            special_font = pg.font.Font(None, 32)
+            screen.blit(special_font.render(f"Special: {special_name.upper()}", True, (200,200,50)),
+                        (panel_x + 20, panel_y + 310))
+
+        for btn in chars:
+            btn.Update(mouse_pos)
+
+        leave.Update(); leave.Col_Update(mouse_pos)
+        pg.display.update()
+        clock.tick(60)
+
+def background():
+    bgs_text = 'SELECT BACKGROUND'
+    global back_ground_map
+
+    selected_full = None
+    preview = None
+    preview_rect = None
+
+    while True:
+        screen.blit(c1_bg, (0,0))
+        screen.blit(c2_bg, (0,0))
+        screen.blit(c4_bg, (0,0))
+
+        mouse_pos = pg.mouse.get_pos()
+
+        # --- MOVE THUMBNAILS UP so they don't cover CONFIRM ---
+        thumb_y = int(height * 0.86)   # was 0.80
+
+        # force all thumbnail buttons to sit on the same line (every frame)
+        bam_bridge_button.y_pos = thumb_y
+        for_bridge_button.y_pos = thumb_y
+        sky_bridge_button.y_pos = thumb_y
+        cas_bridge_button.y_pos = thumb_y
+
+
+
+        confirm.y_pos = int(height * 0.74)   # put it above the bar
+        confirm.x_pos = int(width * 0.90)    # keep it on the right (or change)
+        confirm.text_rect.center = (confirm.x_pos, confirm.y_pos)
+        
+        # --- DRAW OUTLINE STRIP BEHIND THUMBNAILS (INSIDE LOOP) ---
+        strip_h = int(height * 0.16)
+        strip_y = thumb_y - strip_h // 2
+        strip_rect = pg.Rect(int(width * 0.12), strip_y, int(width * 0.76), strip_h)
+
+        pg.draw.rect(screen, (25,25,25), strip_rect, border_radius=20)
+        pg.draw.rect(screen, (220,220,220), strip_rect, 3, border_radius=20)
+
+        # title text
+        bg_select = pg.font.Font(None, 75)
+        bg_select_text = bg_select.render(bgs_text, False, (201, 24, 24))
+        bg_select_rect = bg_select_text.get_rect(center=(width // 2, int(height * 0.18)))
+        screen.blit(bg_select_text, bg_select_rect)
+
+        for event in pg.event.get():
+            if event.type == pg.QUIT:
+                pg.quit()
+                sys.exit()
+
+            if event.type == pg.MOUSEBUTTONDOWN:
+                if leave.Pos_Check(mouse_pos):
+                    return
+
+                global SELECTED_BG_INDEX
+
+                for i, bg_btn in enumerate(background_map):
+                    if bg_btn.Pos_check(mouse_pos):
+                        SELECTED_BG_INDEX = i
+                        selected_full = bg_btn.full_image
+                        preview = scale_to_fit(selected_full, int(width * 0.52), int(height * 0.45))
+                        preview_rect = preview.get_rect(center=(width // 2, int(height*0.47)))
+                        bgs_text = "CLICK CONFIRM"
+                        break
+
+                if confirm.Pos_Check(mouse_pos) and selected_full is not None:
+                    back_ground_map = pg.transform.smoothscale(selected_full, (width, height))
+                    bgs_text = "READY TO FIGHT"
+
+                if bgs_text == "READY TO FIGHT" and go.Pos_Check(mouse_pos):
+                    if GAME_MODE == "local":
+                        run_game(player_1_char, player_2_char, back_ground_map,
+                                CHAR_SPECIAL[player_1_char], CHAR_SPECIAL[player_2_char])
+                    else:
+                        placeholder_p2 = "Pink_Monster"
+                        run_online_host(player_1_char, placeholder_p2, back_ground_map,
+                                        CHAR_SPECIAL[player_1_char], CHAR_SPECIAL[placeholder_p2])
+                        return
+
+        if preview is not None:
+            # --- PREVIEW OUTLINE CARD ---
+            pad = 18  # how much space around the preview
+            card = preview_rect.inflate(pad * 2, pad * 2)
+
+            pg.draw.rect(screen, (25,25,25), card, border_radius=25)          # dark fill
+            pg.draw.rect(screen, (220,220,220), card, 3, border_radius=25)    # outline
+
+            # draw the preview on top
+            screen.blit(preview, preview_rect)
+
+        leave.Col_Update(mouse_pos); leave.Update()
+        confirm.Update(); confirm.Col_Update(mouse_pos)
+
+        if bgs_text == "READY TO FIGHT":
+            go.x_pos = width // 2
+            go.y_pos = int(height * 0.1)
+            go.text_rect.center = (go.x_pos, go.y_pos)
+            go.Update()
+            go.Col_Update(mouse_pos)
+
+        for bg_btn in background_map:
+            bg_btn.Update(mouse_pos)
+
+        pg.display.update()
+        clock.tick(60)
+# =========================================================
+#                ONLINE ENGINE (INTEGRATED)
+# =========================================================
+
+ALL_CHARACTER_ANIMATIONS = {
+    "Pink_Monster": pink_animations,
+    "Owl_Monster": owl_animations,
+    "Dude_Monster": Dude_animations
+}
+
+# frame counts for animation stepping on server
+FRAME_COUNTS = {c: {k: len(v) for k, v in anims.items()} for c, anims in ALL_CHARACTER_ANIMATIONS.items()}
+
+def online_get_inputs(keys) -> dict:
+    # ONLINE: same keys for both players (each PC controls its own player)
+    return {
+        "left":   int(keys[pg.K_a]),
+        "right":  int(keys[pg.K_d]),
+        "jump":   int(keys[pg.K_w]),
+        "attack": int(keys[pg.K_e]),
+        "special":int(keys[pg.K_r]),
+        "block":  int(keys[pg.K_t]),
+    }
+
+class OnlineServer(threading.Thread):
+    def __init__(self, p1_char, p2_char, bg_index, p1_special, p2_special, port=ONLINE_PORT):
+        super().__init__(daemon=True)
+        self.port = port
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.bind(("0.0.0.0", port))
+        self.sock.setblocking(False)
+        self.joined = {1: False, 2: False}
+        self.started = False
+        self.player_addr = {}
+        self.inputs = {
+            1: {"left":0,"right":0,"jump":0,"attack":0,"special":0,"block":0},
+            2: {"left":0,"right":0,"jump":0,"attack":0,"special":0,"block":0},
+        }
+
+        self.sim_w, self.sim_h = 800, 500
+        self.floor = int(self.sim_h * 0.85)
+
+        self.p1_char = p1_char
+        self.p2_char = p2_char
+        self.bg_index = bg_index
+
+        self.p1_special = p1_special
+        self.p2_special = p2_special
+
+        self.running = True
+        self.ko = False
+        self.fireballs = []
+
+        self.p1 = self.make_player(pid=1, x_ratio=0.2, typeofspecial=p1_special)
+        self.p2 = self.make_player(pid=2, x_ratio=0.8, typeofspecial=p2_special)
+
+    def make_player(self, pid, x_ratio, typeofspecial):
+        return {
+            "pid": pid,
+            "x_ratio": x_ratio,
+            "x": int(self.sim_w * x_ratio),
+            "y": self.floor,
+            "w": 60,
+            "h": 140,
+            "vx": 0.0,
+            "vy": 0.0,
+            "speed": 380.0,
+            "facing": "right" if x_ratio < 0.5 else "left",
+            "hp": 100, "hpMax": 100, "hpDisp": 100.0,
+            "special": 100.0, "specialMax": 300.0,
+            "block": 100.0, "blockMax": 100.0,
+            "blocking": False,
+            "attacking": False,
+            "attackType": "normal",
+            "attackTimer": 0.0,
+            "hitbox": None,
+            "stunned": False,
+            "stunTimer": 0.0,
+            "knock": 0.0,
+            "jumpCount": 0,
+            "maxJumps": 2,
+            "doubleJumpT": 0.0,
+            "doubleJumpDur": 0.15,
+            "canSpecial": True,
+            "specialCD": 0.0,
+            "specialCDTime": 0.5,
+            "typeofspecial": typeofspecial,
+
+            # animation synced to clients
+            "anim": "idle",
+            "frame": 0,
+            "animT": 0.0,
+            "animSpeed": 0.10,
+
+            # dash
+            "dashing": False,
+            "dashTimer": 0.0,
+            "dashTime": 0.08,
+            "dashSpeed": 1800.0,
+            "hitOpponents": set(),
+            "combo": 0,
+            "lastHit": 0.0
+        }
+
+    def rect(self, p):
+        return pg.Rect(int(p["x"]), int(p["y"] - p["h"]), int(p["w"]), int(p["h"]))
+
+    def is_airborne(self, p):
+        return (p["y"] < self.floor)
+
+    def reset(self):
+        self.ko = False
+        self.fireballs.clear()
+        for p, x_ratio in (self.p1, 0.2), (self.p2, 0.8):
+            p["x"] = int(self.sim_w * x_ratio)
+            p["y"] = self.floor
+            p["vx"] = 0; p["vy"] = 0
+            p["hp"] = 100; p["hpDisp"] = 100.0
+            p["special"] = 100.0
+            p["block"] = p["blockMax"]
+            p["blocking"] = False
+            p["attacking"] = False
+            p["attackType"] = "normal"
+            p["attackTimer"] = 0.0
+            p["hitbox"] = None
+            p["stunned"] = False
+            p["stunTimer"] = 0.0
+            p["knock"] = 0.0
+            p["jumpCount"] = 0
+            p["doubleJumpT"] = 0.0
+            p["canSpecial"] = True
+            p["specialCD"] = 0.0
+            p["dashing"] = False
+            p["dashTimer"] = 0.0
+            p["combo"] = 0
+            p["hitOpponents"] = set()
+            p["anim"] = "idle"
+            p["frame"] = 0
+            p["animT"] = 0.0
+
+    def start_attack(self, p):
+        p["attacking"] = True
+        p["attackTimer"] = 0.2
+        w, h = p["w"], p["h"]
+        r = self.rect(p)
+        if self.is_airborne(p):
+            hb = pg.Rect(r.centerx - int(0.2*w), r.top - int(0.5*h), int(0.4*w), int(0.5*h))
+        else:
+            if p["facing"] == "right":
+                hb = pg.Rect(r.right, r.top + int(0.2*h), int(0.35*w), int(0.6*h))
+            else:
+                hb = pg.Rect(r.left - int(0.35*w), r.top + int(0.2*h), int(0.35*w), int(0.6*h))
+        p["hitbox"] = hb
+        p["hitOpponents"] = set()
+
+    def spawn_fireball(self, p):
+        r = self.rect(p)
+        self.fireballs.append({
+            "x": r.centerx,
+            "y": r.centery - 10,
+            "dir": p["facing"],
+            "speed": 800.0,
+            "dmg": 25,
+            "owner": p["pid"]
+        })
+
+    def start_special(self, p):
+        p["special"] -= 100
+        p["canSpecial"] = False
+        p["specialCD"] = p["specialCDTime"]
+
+        chosen = p["typeofspecial"]
+        if chosen == "fireball":
+            p["attackType"] = "fireball"
+            self.spawn_fireball(p)
+        elif chosen == "dash":
+            p["attackType"] = "dash"
+            p["dashing"] = True
+            p["dashTimer"] = p["dashTime"]
+            p["hitbox"] = None
+            p["hitOpponents"] = set()
+        elif chosen == "heal":
+            p["hp"] = min(p["hpMax"], p["hp"] + 20)
+        elif chosen == "shockwave":
+            p["attackType"] = "shockwave"
+            rct = self.rect(p)
+            radius = int(max(p["w"], p["h"]) * 1.85)
+            hb = pg.Rect(rct.centerx - radius//2, rct.centery - radius//2, radius, radius)
+            p["hitbox"] = hb
+            p["attacking"] = True
+            p["attackTimer"] = 0.3
+            p["hitOpponents"] = set()
+
+    def choose_anim(self, p, inp):
+        if p["hp"] <= 0:
+            return "death"
+        if p["dashing"]:
+            return "run" 
+        if p["attacking"]:
+            return "attack1"
+        if p["stunned"]:
+            return "hurt"
+        if self.is_airborne(p):
+            if p["doubleJumpT"] > 0:
+                return "double_jump"
+            return "jump"
+        if inp["left"] or inp["right"]:
+            return "run"
+        return "idle"
+
+    def step_player(self, p, inp, dt):
+        if p["hp"] <= 0:
+            return
+
+        # stun timer
+        if p["stunned"]:
+            p["stunTimer"] -= dt
+            if p["stunTimer"] <= 0:
+                p["stunned"] = False
+
+        # special cooldown
+        if not p["canSpecial"]:
+            p["specialCD"] -= dt
+            if p["specialCD"] <= 0:
+                p["canSpecial"] = True
+
+        # block
+        if inp["block"] and not p["stunned"]:
+            p["blocking"] = p["block"] > 0
+        else:
+            p["blocking"] = False
+
+        if p["blocking"]:
+            p["block"] -= 100 * dt
+            if p["block"] < 0:
+                p["block"] = 0
+                p["blocking"] = False
+        else:
+            p["block"] += 30 * dt
+            if p["block"] > p["blockMax"]:
+                p["block"] = p["blockMax"]
+
+        # dash movement
+        if p["dashing"]:
+            direction = 1 if p["facing"] == "right" else -1
+            p["x"] += direction * p["dashSpeed"] * dt
+            p["dashTimer"] -= dt
+
+            # dash hitbox
+            rct = self.rect(p)
+            hb = pg.Rect(rct.left, rct.top, rct.width, rct.height)
+            p["hitbox"] = hb
+
+            if p["dashTimer"] <= 0:
+                p["dashing"] = False
+                p["hitbox"] = None
+                if p["attackType"] == "dash":
+                    p["attackType"] = "normal"
+
+        # move left/right (only if not dashing)
+        if (not p["dashing"]) and (not p["stunned"]):
+            if inp["left"]:
+                p["x"] -= p["speed"] * dt
+                p["facing"] = "left"
+            if inp["right"]:
+                p["x"] += p["speed"] * dt
+                p["facing"] = "right"
+
+        # clamp walls
+        p["x"] = max(0, min(self.sim_w - p["w"], p["x"]))
+
+        # jump
+        if inp["jump"] and not p["stunned"]:
+            JUMP_V = self.sim_h * (-0.036)
+            if p["jumpCount"] < p["maxJumps"]:
+                p["vy"] = JUMP_V
+                p["jumpCount"] += 1
+                if p["jumpCount"] == 2:
+                    p["doubleJumpT"] = p["doubleJumpDur"]
+
+        # attack
+        if inp["attack"] and (not p["attacking"]) and (not p["blocking"]) and (not p["stunned"]):
+            self.start_attack(p)
+
+        # special
+        if inp["special"] and p["special"] >= 100 and p["canSpecial"] and (not p["attacking"]) and (not p["blocking"]) and (not p["stunned"]):
+            self.start_special(p)
+
+        # attack timer
+        if p["attacking"]:
+            p["attackTimer"] -= dt
+            if p["attackTimer"] <= 0:
+                p["attacking"] = False
+                p["hitbox"] = None
+                p["hitOpponents"] = set()
+
+        # gravity
+        g = self.sim_h * 0.002
+        p["vy"] += g
+        p["y"] += p["vy"]
+
+        if p["y"] >= self.floor:
+            p["y"] = self.floor
+            p["vy"] = 0
+            p["jumpCount"] = 0
+
+        # double jump timer
+        if p["doubleJumpT"] > 0:
+            p["doubleJumpT"] -= dt
+
+        # passive special gain
+        p["special"] = min(p["specialMax"], p["special"] + 10 * dt)
+
+    def apply_hits(self, attacker, defender):
+        if not attacker["hitbox"]:
+            return
+        hb = attacker["hitbox"]
+        if hb.colliderect(self.rect(defender)) and defender["pid"] not in attacker["hitOpponents"]:
+            attacker["hitOpponents"].add(defender["pid"])
+
+            dmg = 5
+            if attacker["attackType"] == "shockwave":
+                height_above = max(0, self.floor - defender["y"])
+                dmg = 15 + height_above * 0.08
+
+            if not defender["blocking"]:
+                defender["hp"] = max(0, defender["hp"] - dmg)
+                defender["stunned"] = True
+                defender["stunTimer"] = 0.25
+
+            # KO check
+            if defender["hp"] <= 0:
+                self.ko = True
+
+    def step_fireballs(self, dt):
+        for fb in list(self.fireballs):
+            if fb["dir"] == "right":
+                fb["x"] += fb["speed"] * dt
+            else:
+                fb["x"] -= fb["speed"] * dt
+
+            # offscreen
+            if fb["x"] < -50 or fb["x"] > self.sim_w + 50:
+                self.fireballs.remove(fb)
+                continue
+
+            # collision
+            fb_rect = pg.Rect(int(fb["x"]-10), int(fb["y"]-10), 20, 20)
+            if fb["owner"] != 1 and fb_rect.colliderect(self.rect(self.p1)):
+                if not self.p1["blocking"]:
+                    self.p1["hp"] = max(0, self.p1["hp"] - fb["dmg"])
+                self.fireballs.remove(fb)
+                if self.p1["hp"] <= 0:
+                    self.ko = True
+            elif fb["owner"] != 2 and fb_rect.colliderect(self.rect(self.p2)):
+                if not self.p2["blocking"]:
+                    self.p2["hp"] = max(0, self.p2["hp"] - fb["dmg"])
+                self.fireballs.remove(fb)
+                if self.p2["hp"] <= 0:
+                    self.ko = True
+
+    def pack_state(self):
+        def hb_dict(hb):
+            if hb is None:
+                return None
+            return {"x": hb.x, "y": hb.y, "w": hb.width, "h": hb.height}
+
+        return {
+            "started": self.started,
+            "joined": {"p1": self.joined[1], "p2": self.joined[2]},
+            "sim": {"w": self.sim_w, "h": self.sim_h},
+            "bg_index": self.bg_index,
+            "p1_char": self.p1_char,
+            "p2_char": self.p2_char,
+            "ko": self.ko,
+            "p1": {
+                "x": self.p1["x"], "y": self.p1["y"], "w": self.p1["w"], "h": self.p1["h"],
+                "hp": self.p1["hp"], "hpMax": self.p1["hpMax"], "hpDisp": self.p1["hpDisp"],
+                "special": self.p1["special"], "specialMax": self.p1["specialMax"],
+                "block": self.p1["block"], "blockMax": self.p1["blockMax"],
+                "facing": self.p1["facing"], "blocking": self.p1["blocking"],
+                "hitbox": hb_dict(self.p1["hitbox"]),
+                "anim": self.p1["anim"], "frame": self.p1["frame"],
+            },
+            "p2": {
+                "x": self.p2["x"], "y": self.p2["y"], "w": self.p2["w"], "h": self.p2["h"],
+                "hp": self.p2["hp"], "hpMax": self.p2["hpMax"], "hpDisp": self.p2["hpDisp"],
+                "special": self.p2["special"], "specialMax": self.p2["specialMax"],
+                "block": self.p2["block"], "blockMax": self.p2["blockMax"],
+                "facing": self.p2["facing"], "blocking": self.p2["blocking"],
+                "hitbox": hb_dict(self.p2["hitbox"]),
+                "anim": self.p2["anim"], "frame": self.p2["frame"],
+            },
+            "fireballs": [{"x": f["x"], "y": f["y"], "dir": f["dir"]} for f in self.fireballs]
+        }
+
+    def run(self):
+        last = time.time()
+        while self.running:
+            now = time.time()
+            dt = now - last
+            last = now
+            if dt > 0.05:
+                dt = 0.05
+
+            # receive packets
+            for _ in range(60):
+                try:
+                    data, addr = self.sock.recvfrom(MAX_PACKET)
+                except BlockingIOError:
+                    break
+                msg = decode(data)
+                if not msg:
+                    continue
+
+                if "join" in msg:
+                    pid = int(msg["join"])
+                    self.player_addr[pid] = addr
+                    self.joined[pid] = True  # ✅ IMPORTANT
+
+                    if pid == 2 and msg.get("char"):
+                        self.p2_char = msg["char"]
+                        self.p2["typeofspecial"] = CHAR_SPECIAL[self.p2_char]
+
+                    # start when both players present
+                    if self.joined[1] and self.joined[2]:
+                        self.started = True
+
+                if "player" in msg and "inputs" in msg:
+                    pid = int(msg["player"])
+                    if pid in self.inputs:
+                        inp = msg["inputs"]
+                        self.inputs[pid] = {k: int(bool(inp.get(k, 0))) for k in self.inputs[pid].keys()}
+
+                if msg.get("replay") == 1:
+                    self.reset()
+
+            if self.started and (not self.ko):
+                self.step_player(self.p1, self.inputs[1], dt)
+                self.step_player(self.p2, self.inputs[2], dt)
+
+                self.apply_hits(self.p1, self.p2)
+                self.apply_hits(self.p2, self.p1)
+
+                self.step_fireballs(dt)
+
+                # chip health smoothing
+                self.p1["hpDisp"] += (self.p1["hp"] - self.p1["hpDisp"]) * 0.12
+                self.p2["hpDisp"] += (self.p2["hp"] - self.p2["hpDisp"]) * 0.12
+
+            # animation stepping (server decides anim+frame)
+            for p, inp, char in ((self.p1, self.inputs[1], self.p1_char), (self.p2, self.inputs[2], self.p2_char)):
+                nxt = self.choose_anim(p, inp)
+                if nxt != p["anim"]:
+                    p["anim"] = nxt
+                    p["frame"] = 0
+                    p["animT"] = 0.0
+                p["animT"] += dt
+                if p["animT"] >= p["animSpeed"]:
+                    p["animT"] = 0.0
+                    n = FRAME_COUNTS[char].get(p["anim"], 1)
+                    if p["anim"] == "death":
+                        p["frame"] = min(p["frame"] + 1, n - 1)
+                    else:
+                        p["frame"] = (p["frame"] + 1) % n
+
+            # send state
+            pkt = encode(self.pack_state())
+            for pid, addr in list(self.player_addr.items()):
+                try:
+                    self.sock.sendto(pkt, addr)
+                except Exception:
+                    pass
+
+            time.sleep(max(0.0, (1.0 / 60.0) - (time.time() - now)))
+
+        self.sock.close()
+
+def run_online_host(p1_char, p2_char, background_surface, p1_special, p2_special):
+    # background_surface is already your chosen full-screen background
+    # pick a bg_index so joiner can draw same if they have same bg list (optional)
+    bg_index = 0
+    server = OnlineServer(p1_char, p2_char, bg_index, p1_special, p2_special)
+    server.start()
+
+    # host connects to itself as player 1
+    run_online_client("127.0.0.1", player_id=1, forced_bg=background_surface)
+
+    server.running = False
+
+def run_online_client(server_ip, player_id, forced_bg=None, chosen_char=None):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setblocking(False)
+    sock.sendto(encode({"join": player_id, "char": chosen_char}), (server_ip, ONLINE_PORT))
+
+    state_lock = threading.Lock()
+    inputs_lock = threading.Lock()
+    latest_inputs = {"left":0,"right":0,"jump":0,"attack":0,"special":0,"block":0}
+    state = None
+
+    def draw_bars_online(surface, width, height, s):
+        # make tiny objects with the attributes your draw_bars expects
+        class P: pass
+        p1 = P(); p2 = P()
+        p1.health = s["p1"]["hp"]; p1.max_health = s["p1"]["hpMax"]; p1.display_health = s["p1"]["hpDisp"]
+        p2.health = s["p2"]["hp"]; p2.max_health = s["p2"]["hpMax"]; p2.display_health = s["p2"]["hpDisp"]
+
+        # if your draw_bars uses these too:
+        p1.special_attack = s["p1"].get("special", 0); p1.max_special = s["p1"].get("specialMax", 300)
+        p2.special_attack = s["p2"].get("special", 0); p2.max_special = s["p2"].get("specialMax", 300)
+        p1.block_stamina = s["p1"].get("block", 0); p1.max_block_stamina = s["p1"].get("blockMax", 100)
+        p2.block_stamina = s["p2"].get("block", 0); p2.max_block_stamina = s["p2"].get("blockMax", 100)
+
+        draw_bars(surface, width, height, p1, p2)
+
+    def net_thread():
+        nonlocal state
+        TICK = 1.0 / 60.0
+        while True:
+            with inputs_lock:
+                to_send = dict(latest_inputs)
+            try:
+                sock.sendto(encode({"player": player_id, "inputs": to_send}), (server_ip, ONLINE_PORT))
+            except Exception:
+                pass
+
+            try:
+                for _ in range(15):
+                    try:
+                        data, _ = sock.recvfrom(8192)
+                    except BlockingIOError:
+                        break
+                    s = decode(data)
+                    if s:
+                        with state_lock:
+                            state = s
+            except Exception:
+                pass
+
+            time.sleep(TICK)
+
+    threading.Thread(target=net_thread, daemon=True).start()
+
+    # main client loop uses your current pygame screen
+    running = True
+    while running:
+        dt = clock.tick(120) / 1000.0
+        mouse_pos = pg.mouse.get_pos()
+
+        for event in pg.event.get():
+            if event.type == pg.QUIT:
+                pg.quit(); sys.exit()
+            if event.type == pg.KEYDOWN and event.key == pg.K_ESCAPE:
+                running = False
+            if event.type == pg.KEYDOWN and event.key == pg.K_RETURN:
+                with state_lock:
+                    s = state
+                if s and s.get("ko"):
+                    try:
+                        sock.sendto(encode({"replay": 1}), (server_ip, ONLINE_PORT))
+                    except Exception:
+                        pass
+
+        pg.event.pump()
+        keys = pg.key.get_pressed()
+        with inputs_lock:
+            latest_inputs = online_get_inputs(keys)
+
+        with state_lock:
+            s = copy.deepcopy(state)
+
+        # --- WAIT / CONNECT UI ---
+        if not s:
+            screen.fill((20,20,20))
+            f = pg.font.SysFont("Arial", 40, bold=True)
+            t = f.render("CONNECTING...", True, (255,255,255))
+            screen.blit(t, t.get_rect(center=(width//2, height//2)))
+            pg.display.update()
+            continue
+
+        if not s.get("started", False):
+            screen.fill((15, 15, 15))
+            f = pg.font.SysFont("Arial", 60, bold=True)
+
+            joined = s.get("joined", {})
+            if joined.get("p1") and not joined.get("p2"):
+                msg = "WAITING FOR PLAYER 2..."
+            else:
+                msg = "WAITING FOR HOST..."
+
+            t = f.render(msg, True, (255,255,255))
+            screen.blit(t, t.get_rect(center=(width//2, height//2)))
+
+            if player_id == 1:
+                draw_host_ip_overlay()
+
+            pg.display.update()
+            continue
+
+        # draw background
+        if forced_bg is not None:
+            screen.blit(forced_bg, (0,0))
+        else:
+            screen.fill((30,30,30))
+
+        # scale sim->screen
+        sim_w = s["sim"]["w"]
+        sim_h = s["sim"]["h"]
+
+        scale = min(width / sim_w, height / sim_h)   # uniform scale
+        offset_x = (width  - sim_w * scale) / 2
+        offset_y = (height - sim_h * scale) / 2
+
+        def to_screen(x, y):
+            return (int(offset_x + x * scale), int(offset_y + y * scale))
+
+        def draw_player(p_dict, char_name):
+            anims = ALL_CHARACTER_ANIMATIONS[char_name]
+            anim = p_dict.get("anim", "idle")
+            frame = int(p_dict.get("frame", 0))
+            frames = anims.get(anim, anims["idle"])
+            frame = max(0, min(frame, len(frames)-1))
+            img = frames[frame]
+
+            if p_dict.get("facing") == "left":
+                img = pg.transform.flip(img, True, False)
+
+            w = int(p_dict["w"] * scale)
+            h = int(p_dict["h"] * scale)
+
+            x, bottom = to_screen(p_dict["x"], p_dict["y"])
+            img2 = pg.transform.smoothscale(img, (w, h))
+            screen.blit(img2, (x, bottom - h))
+            # shield
+
+
+            if p_dict.get("blocking"):
+                shield_w = int(w * 2.1)
+                shield_h = int(h * 1.3)
+                shield_surface = pg.Surface((shield_w, shield_h), pg.SRCALPHA)
+                pg.draw.ellipse(shield_surface, (50, 50, 255, 150), shield_surface.get_rect())
+                cx = x + w//2
+                cy = bottom - h//2
+                screen.blit(shield_surface, shield_surface.get_rect(center=(cx, cy)))
+
+        draw_player(s["p1"], s["p1_char"])
+        draw_player(s["p2"], s["p2_char"])
+
+        # fireballs
+        for f in s.get("fireballs", []):
+            fx = int(f["x"] * scale)
+            fy = int(f["y"] * scale)
+            pg.draw.circle(screen, (255,165,0), (fx, fy), 10)
+
+        # bars (re-use your existing draw_bars? easiest: just call your local draw_bars from run_game is nested)
+        # Minimal quick UI text:
+        font = pg.font.SysFont("Arial", 26, bold=True)
+        draw_bars_online(screen, width, height, s)
+
+        if s.get("ko"):
+            # --- KO (match local style) ---
+            try:
+                ko_font = pg.font.Font("ARCADECLASSIC.ttf", int(0.33*height))
+            except:
+                ko_font = pg.font.SysFont("Arial", int(0.25*height), bold=True)
+
+            winner_font = pg.font.SysFont("Arial", int(0.12*height), bold=True)
+
+            ko_y = int(0.30 * height)
+            ko_text_str = "KO"
+
+            ko_main = ko_font.render(ko_text_str, True, (255,255,255))
+            ko_rect = ko_main.get_rect(center=(width//2, ko_y))
+
+            # splatter effect
+            for _ in range(15):
+                ox = r.randint(-15, 15)
+                oy = r.randint(-5, 5)
+                spl = ko_font.render(ko_text_str, True, (230,230,230))
+                spl_rect = spl.get_rect(center=(width//2 + ox, ko_y + oy))
+                screen.blit(spl, spl_rect)
+
+            screen.blit(ko_main, ko_rect)
+
+            winner = "WINNER PLAYER 2" if s["p1"]["hp"] <= 0 else "WINNER PLAYER 1"
+            wcol = PLAYER2_COLOR if s["p1"]["hp"] <= 0 else PLAYER1_COLOR
+            wtxt = winner_font.render(winner, True, wcol)
+            screen.blit(wtxt, wtxt.get_rect(center=(width//2, int(ko_y + 0.15*height))))
+
+            # Replay button (same style)
+            bw = width * 0.25
+            bh = height * 0.10
+            bx = width//2 - bw//2
+            by = int(ko_y + 0.30*height)
+
+            replay_rect = pg.Rect(bx, by, bw, bh)
+            pg.draw.rect(screen, (200,200,200), replay_rect, border_radius=10)
+
+            bfont = pg.font.SysFont("Arial", int(0.07*height), bold=True)
+            btxt = bfont.render("REPLAY", True, (255,255,255))
+            screen.blit(btxt, btxt.get_rect(center=replay_rect.center))
+
+            # click replay -> tell server to reset
+            if pg.mouse.get_pressed()[0]:
+                if replay_rect.collidepoint(pg.mouse.get_pos()):
+                    try:
+                        sock.sendto(encode({"replay": 1}), (server_ip, ONLINE_PORT))
+                    except Exception:
+                        pass
+        pg.display.update()
+
+    sock.close()
+def run_game(player1_sprite, player2_sprite, background_image, p1_special, p2_special):
+    global screen
+    global width, height
+
+    initial_width, initial_height = 800, 500
+    clock = pg.time.Clock()
+    pg.display.set_caption('Fighter Game')
+    
+    fireball_image = pg.image.load("C:/Users/saira/OneDrive/Desktop/Python projects/Fighter game/GAME/fireball.png").convert_alpha()
+
+    
+    pg.display.set_icon(fireball_image)
+    fullscreen = False
+    ko_triggered = False
+    ko_y = -200
+    replay_rect = None
+
+    BG_COLOR = (30, 30, 30)
+    PLAYER1_COLOR = (255, 0, 0)
+    PLAYER2_COLOR = (0, 0, 255)
+    FIREBALL_COLOR = (255, 165, 0) # Orange
+    BLOCK_SHIELD_COLOR = (50, 50, 255, 150) 
+
+    # --- Global Groups ---
+    all_sprites = pg.sprite.Group()
+    fireballs = pg.sprite.Group()
+
+    class Fireball(pg.sprite.Sprite):
+        def __init__(self, start_x, start_y, direction, color, screen_width):
+            super().__init__()
+            self.direction = direction  # left or right
+            self.speed = 0.5*width
+            self.damage = 25
+            self.screen_width = screen_width
+            self.owner = None
+
+            self.original_image = fireball_image
+            self.image = pg.transform.scale(self.original_image, (30, 30)) 
+            if self.direction == "left":
+                self.image = pg.transform.flip(self.image, True, False)
+            self.rect = self.image.get_rect(center=(start_x, start_y))
+
+        def update(self, dt, *args): 
+        
+            if self.direction == "right":
+                self.rect.x += self.speed * dt
+            else:
+                self.rect.x -= self.speed * dt
+            
+            if self.rect.right < 0 or self.rect.left > self.screen_width:
+                self.kill()
+
+    # --- Player Class ---
+    class Player(pg.sprite.Sprite):
+        def __init__(self, x_ratio, color, controls, typeofspecial):
+            super().__init__()
+            self.color = color
+            self.x_ratio = x_ratio
+            self.dead = False
+            self.animations = None
+            self.current_animation = "idle"
+            self.frame_index = 0
+            self.animation_timer = 0
+            self.animation_speed = 0.1
+            
+            self.chosen_sprite = None  # store chosen sprite
+
+            self.image = pg.Surface((50, 100))
+            self.image.fill(color)
+            self.rect = self.image.get_rect() 
+            self.controls = controls
+            self.speed = 380
+            self.gravity = 0
+            self.attacking = False
+            self.blocking = False
+            self.active_hitbox = None
+            self.hit_opponents = []
+            self.facing = "right" if x_ratio < 0.5 else "left"
+            self.health = 100
+            self.max_health = 100
+            
+            self.typeofspecial = typeofspecial
+            self.special_attack = 100
+            self.max_special = 300
+            self.special_cost = 100
+            self.can_special = True 
+            self.special_cooldown_timer = 0
+            self.special_cooldown_time = 0.5 
+
+            self.block_stamina = 100
+            self.max_block_stamina = 100
+            self.block_drain_rate = 100
+            self.block_recover_rate = 30
+            
+            self.combo_count = 0
+            self.last_hit_time = 0
+            self.combo_reset_time = 0.8
+
+            self.stunned = False
+            self.stun_timer = 0
+            self.knockback_velocity = 0
+            
+            self.shockwave_damage = 30
+            self.shockwave_base_damage = 15
+            self.shockwave_height_multiplier = 0.08
+
+            self.attack_type = "normal"
+
+            self.max_jumps = 2
+            self.jump_count = 0
+            self.jump_pressed = False
+            self.double_jump_timer = 0
+            self.double_jump_duration = 0.15  # seconds (tweak 0.10–0.20)
+            # Dash state
+            self.dashing = False
+            self.dash_speed = 1.5*width
+            self.dash_time = 0.08
+            self.dash_timer = 0
+            self.dash_trail = []  
+            self.dash_trail_max = 10  
+
+            self.max_dash_charges = 3
+            self.dash_charges = 0
+            self.dash_hit_this_dash = False
+
+            self.display_health = self.health
+            
+            if self.typeofspecial == "joker":
+                self.joker_deck = ["fireball", "dash", "heal", "shockwave"]  # list
+                r.shuffle(self.joker_deck)  # shuffle 
+                self.joker_index = 0          # points to next
+                self.joker_current = self.joker_deck[self.joker_index]
+            else:
+                self.joker_deck = None
+                self.joker_index = None
+                self.joker_current = None
+
+            self.flying = False
+            self.fly_timer = 0
+            self.fly_duration = 20  # seconds
+            self.fly_speed = 500
+            self.particles = []
+        
+        def update_animation(self, dt):
+            frames = self.animations[self.current_animation]
+            if len(frames) == 0:
+                return
+
+            self.animation_timer += dt
+            if self.animation_timer >= self.animation_speed:
+                self.animation_timer = 0
+
+                if self.current_animation == "death":
+                    # stop on last frame
+                    if self.frame_index < len(frames) - 1:
+                        self.frame_index += 1
+                else:
+                    self.frame_index = (self.frame_index + 1) % len(frames)
+
+            self.image = frames[self.frame_index]
+            if self.facing == "left":
+                self.image = pg.transform.flip(self.image, True, False)
+            
+        def initial_setup(self, screen_width, screen_height):
+            floor = int(screen_height * 0.85)            
+            self.image = self.animations["idle"][0]
+            self.rect = self.image.get_rect(midbottom=(int(screen_width * self.x_ratio), floor))
+
+  
+        def handle_input(self, dt, screen_height, screen_width):
+            if ko_triggered or self.stunned:
+                return
+            keys = pg.key.get_pressed()
+            floor = int(screen_height * 0.85)            
+            
+            if not self.dashing:
+                if keys[self.controls["left"]]:
+                    self.rect.x -= self.speed * dt
+                    self.facing = "left"
+                if keys[self.controls["right"]]:
+                    self.rect.x += self.speed * dt
+                    self.facing = "right"
+            # keep player inside screen (restores "walls")
+            if self.rect.left < 0:
+                self.rect.left = 0
+            if self.rect.right > screen_width:
+                self.rect.right = screen_width
+        
+            JUMP_VELOCITY_RATIO = -0.036 
+            JUMP_VELOCITY = screen_height * JUMP_VELOCITY_RATIO
+            
+            wall_touch = None
+            if self.rect.left <= 0:
+                wall_touch = "left"
+            elif self.rect.right >= screen_width:
+                wall_touch = "right"
+
+            # Jumping + wall jump
+            if keys[self.controls["jump"]]:
+                if not self.jump_pressed:
+                    if self.jump_count < self.max_jumps:
+                        self.gravity = JUMP_VELOCITY
+                        self.jump_count += 1
+
+                        if self.jump_count == 2:
+                            self.double_jump_timer = self.double_jump_duration
+
+                    elif wall_touch:
+                        self.gravity = JUMP_VELOCITY
+                        if wall_touch == "left":
+                            self.rect.x += int(0.1 * screen_width)
+                            self.facing = "right"
+                        else:
+                            self.rect.x -= int(0.1 * screen_width)
+                            self.facing = "left"
+                    self.jump_pressed = True
+            else:
+                self.jump_pressed = False
+
+            # Blocking 
+            if keys[self.controls["block"]]:  
+                self.blocking = self.block_stamina > 0
+            else:
+                self.blocking = False
+
+            if self.blocking:
+                self.block_stamina -= self.block_drain_rate * dt
+                if self.block_stamina < 0:
+                    self.block_stamina = 0
+                    self.blocking = False
+            else:
+                self.block_stamina += self.block_recover_rate * dt
+                if self.block_stamina > self.max_block_stamina:
+                    self.block_stamina = self.max_block_stamina
+
+            # BasicAttack
+            if keys[self.controls["attack"]] and not self.attacking and not self.blocking:
+                self.start_attack(screen_height)
+            
+            if (keys[self.controls["special"]] and
+                self.special_attack >= self.special_cost and
+                self.can_special and not self.attacking and not self.blocking):
+                self.start_special(screen_width)
+
+            if self.flying:
+                keys = pg.key.get_pressed()
+
+                if keys[self.controls["left"]]:
+                    self.rect.x -= self.fly_speed * dt
+                if keys[self.controls["right"]]:
+                    self.rect.x += self.fly_speed * dt
+                if keys[self.controls["jump"]]:
+                    self.rect.y -= self.fly_speed * dt
+                if keys[self.controls["block"]]:  # use block key to go down
+                    self.rect.y += self.fly_speed * dt
+
+
+
+
+
+
+
+                # Clamp to screen
+                self.rect.left = max(0, self.rect.left)
+                self.rect.right = min(screen_width, self.rect.right)
+                self.rect.top = max(0, self.rect.top)
+                self.rect.bottom = min(screen_height, self.rect.bottom)
+
+                return
+
+        def apply_gravity(self, screen_height, screen_width=None):
+            if self.flying:
+                return
+
+            floor = int(screen_height * 0.85)
+            GRAVITY_ACCELERATION_RATIO = 0.002
+            GRAVITY_ACCELERATION = screen_height * GRAVITY_ACCELERATION_RATIO
+            WALL_SLIDE_SPEED_RATIO = 0.5
+
+            # Wall slide
+            wall_touch = self.is_touching_wall(screen_width) if screen_width else None
+
+            # SNAP to wall while airborne so climb doesn't float
+            if wall_touch and self.is_airborne(screen_height):
+                if wall_touch == "left":
+                    self.rect.left = 0
+                    self.facing = "right"   # optional: face away from wall
+                elif wall_touch == "right":
+                    self.rect.right = screen_width
+                    self.facing = "left"            
+                self.gravity = min(self.gravity, GRAVITY_ACCELERATION / WALL_SLIDE_SPEED_RATIO)
+
+            # Apply gravity
+            self.gravity += GRAVITY_ACCELERATION
+            self.rect.y += self.gravity
+
+            # Floor collision
+            if self.rect.bottom >= floor:
+                self.rect.bottom = floor
+                self.gravity = 0
+                self.jump_count = 0
+
+            # Knockback movement
+            if self.knockback_velocity != 0:
+                self.rect.x += self.knockback_velocity
+                self.knockback_velocity *= 0.85
+                if abs(self.knockback_velocity) < 1:
+                    self.knockback_velocity = 0
+
+            # Stun timer
+            if self.stunned:
+                self.stun_timer -= 1 / 60
+                if self.stun_timer <= 0:
+                    self.stunned = False
+
+        def start_attack(self, screen_height):
+            self.attack_type = "normal"
+            self.attacking = True
+            self.attack_timer = 0.2
+            w, h = self.rect.width, self.rect.height
+            keys = pg.key.get_pressed()
+            up_attack = keys[self.controls["jump"]]
+            airborne = self.is_airborne(screen_height)
+
+            if up_attack:
+                if airborne:
+                    self.active_hitbox = pg.Rect(self.rect.centerx - 0.2*w, self.rect.top - 0.5*h, 0.4*w, 0.5*h)
+                else:
+                    self.active_hitbox = pg.Rect(self.rect.centerx - 0.25*w, self.rect.top - 0.4*h, 0.5*w, 0.4*h)
+            else:
+                if self.facing == "right":
+                    self.active_hitbox = pg.Rect(self.rect.right, self.rect.top + 0.2*h, 0.35*w, 0.6*h)
+                else:
+                    self.active_hitbox = pg.Rect(self.rect.left - 0.35*w, self.rect.top + 0.2*h, 0.35*w, 0.6*h)
+            self.hit_opponents = []
+
+        def start_special(self, screen_width):
+            self.special_attack -= self.special_cost
+            self.can_special = False
+            self.special_cooldown_timer = self.special_cooldown_time
+            self.last_attack_was_special = True
+
+            if self.typeofspecial == "joker":
+                chosen = self.joker_current
+            else:
+                chosen = self.typeofspecial
+
+            if chosen == "fireball":
+                self.attack_type = "fireball"
+                start_x = self.rect.centerx
+                start_y = self.rect.centery - 10 
+                fireball = Fireball(start_x, start_y, self.facing, FIREBALL_COLOR, screen_width)
+                fireball.owner = self
+                all_sprites.add(fireball)
+                fireballs.add(fireball)
+
+            if chosen == "dash":
+                self.attack_type = "dash"
+                self.dashing = True
+                self.dash_timer = self.dash_time
+                self.dash_charges = self.max_dash_charges
+                self.dash_hit_this_dash = False
+                self.hit_opponents =[]
+
+            if chosen == "heal":
+                if self.health == self.max_health and self.special_attack >= self.max_special - self.special_cost:
+                    self.flying = True
+                    self.fly_timer = self.fly_duration
+                else:
+                    self.health += 20
+                    if self.health > self.max_health:
+                        self.health = self.max_health
+
+
+            if chosen == "shockwave":
+                self.attack_type = "shockwave"
+                w, h = self.rect.width, self.rect.height
+                shockwave_radius = max(w, h) * 1.85
+                self.active_hitbox = pg.Rect(self.rect.centerx - shockwave_radius/2, self.rect.centery - shockwave_radius/2, shockwave_radius, shockwave_radius)
+                self.attacking = True
+                self.attack_timer = 0.3
+                self.hit_opponents = []
+            
+            if self.typeofspecial == "joker":
+                self.joker_index += 1
+                if self.joker_index >= len(self.joker_deck):
+                    self.joker_index = 0  # looping
+                self.joker_current = self.joker_deck[self.joker_index]
+        
+        def update_attack(self, dt):
+            if self.attacking:
+                self.attack_timer -= dt
+                if self.attack_timer <= 0:
+                    self.attacking = False
+                    self.active_hitbox = None
+                    self.hit_opponents = []
+            if not self.can_special:
+                self.special_cooldown_timer -= dt
+                if self.special_cooldown_timer <= 0:
+                    self.can_special = True
+
+        def gain_special(self, amount):
+            self.special_attack += amount
+            if self.special_attack > self.max_special:
+                self.special_attack = self.max_special
+
+        def deal_damage(self, amount):
+            if self.dead:
+                return
+            
+            self.health -= amount
+            if self.health <= 0:
+                self.health = 0
+                self.dead = True
+                self.attacking = False
+                self.blocking = False
+                self.active_hitbox = None
+            self.gain_special(amount * 0.5) 
+
+        def update(self, dt, screen_width, screen_height):
+            keys = pg.key.get_pressed()
+            self.handle_input(dt, screen_height, screen_width)
+            
+            if self.dead or ko_triggered:
+                # still let gravity settle them onto the floor if you want:
+                self.apply_gravity(screen_height, screen_width)
+
+                new_animation = "death" if self.dead else "idle"
+
+                if new_animation != self.current_animation:
+                    self.current_animation = new_animation
+                    self.frame_index = 0
+                    self.animation_timer = 0
+
+                self.update_animation(dt)
+                return
+            
+            if self.double_jump_timer > 0:
+                self.double_jump_timer -= dt
+
+            if self.attacking:
+                new_animation = "attack1"
+            elif self.stunned:
+                new_animation = "hurt"
+            
+            elif self.is_airborne(screen_height) and self.is_touching_wall(screen_width):
+                new_animation = "climb"
+
+            elif self.is_airborne(screen_height):
+                if self.double_jump_timer > 0:
+                    new_animation = "double_jump"
+                else:
+                    new_animation = "jump"
+
+            elif keys[self.controls["left"]] or keys[self.controls["right"]]:
+                new_animation = "run"
+            else:
+                new_animation = "idle"
+
+            # RESET frame index when animation changes
+            if new_animation != self.current_animation:
+                self.current_animation = new_animation
+                self.frame_index = 0
+                self.animation_timer = 0
+            
+            if self.dashing:
+                direction = 1 if self.facing == "right" else -1
+                self.rect.x += direction * self.dash_speed * dt
+                self.dash_timer -= dt
+                if self.rect.left < 0:
+                    self.rect.left = 0
+                if self.rect.right > screen_width:
+                    self.rect.right = screen_width
+                self.active_hitbox = pg.Rect(
+                    min(self.rect.centerx, self.rect.centerx + direction * self.dash_speed * dt),
+                    self.rect.top,
+                    self.rect.width * 0.6 + self.dash_speed * dt,
+                    self.rect.height
+                )
+
+                # Dash trail effect
+                trail_surf = self.image.copy()
+                trail_surf.fill((255,255,255), special_flags=pg.BLEND_RGB_ADD)
+                trail_rect = trail_surf.get_rect(center=self.rect.center)
+                self.dash_trail.append([trail_surf, trail_rect, 180])
+
+                if len(self.dash_trail) > self.dash_trail_max:
+                    self.dash_trail.pop(0)
+
+                if self.dash_timer <= 0:
+                    self.dashing = False
+                    self.active_hitbox = None
+                    self.dash_hit_this_dash = False
+                    self.hit_opponents = []
+
+            if not self.dashing and self.attack_type == "dash":
+                self.attack_type = "normal"
+
+
+            self.apply_gravity(screen_height, screen_width)
+            self.update_attack(dt)
+            self.display_health += (self.health - self.display_health) * 0.12
+
+            for trail in self.dash_trail:
+                trail[2] -= 600 * dt  # fade speed
+            self.dash_trail = [t for t in self.dash_trail if t[2] > 0]  # remove invisible
+
+            # Draw trail
+            for trail_surf, trail_rect, alpha in self.dash_trail:
+                surf = trail_surf.copy()
+                surf.set_alpha(int(alpha))
+                screen.blit(surf, trail_rect)
+
+            # Fly timer
+            if self.flying:
+                self.fly_timer -= dt
+                if self.fly_timer <= 0:
+                    self.flying = False
+                    self.gravity = 0
+            if self.flying:
+                aura = pg.Surface((self.rect.width + 10, self.rect.height + 10),pg.SRCALPHA)
+                pg.draw.rect(aura, (150, 200, 255, 80), aura.get_rect(), border_radius=20)
+                screen.blit(aura, (self.rect.x - 5, self.rect.y - 5))
+            
+            self.update_animation(dt)
+
+        def is_airborne(self, screen_height):
+            floor = int(screen_height * 0.85)
+            return self.rect.bottom < floor - 5
+                    
+        def is_touching_wall(self, screen_width):
+            if self.rect.left <= 0:
+                return "left"
+            elif self.rect.right >= screen_width:
+                return "right"
+            return None
+
+
+    # --- Game Setup ---
+    player1 = Player(0.2, PLAYER1_COLOR,
+        {"left": pg.K_a, "right": pg.K_d, "jump": pg.K_w, "attack": pg.K_e, "special": pg.K_r, "block": pg.K_t},p1_special)
+
+    player2 = Player(0.8, PLAYER2_COLOR,
+        {"left": pg.K_LEFT, "right": pg.K_RIGHT, "jump": pg.K_UP, "attack": pg.K_KP1, "special": pg.K_KP2, "block": pg.K_KP3},p2_special)
+
+    player1.animations = ALL_CHARACTER_ANIMATIONS[player1_sprite]
+    player2.animations = ALL_CHARACTER_ANIMATIONS[player2_sprite]
+
+    player1.current_animation = "idle"
+    player2.current_animation = "idle"
+
+    player1.frame_index = 0
+    player2.frame_index = 0
+
+    player1.image = player1.animations["idle"][0]
+    player2.image = player2.animations["idle"][0]
+
+    player1.rect = player1.image.get_rect(midbottom=(int(width * player1.x_ratio), int(0.8 * height)))
+    player2.rect = player2.image.get_rect(midbottom=(int(width * player2.x_ratio), int(0.8 * height)))
+
+
+    player1.initial_setup(initial_width, initial_height)
+    player2.initial_setup(initial_width, initial_height)
+
+    players = pg.sprite.Group(player1, player2)
+    all_sprites.add(player1, player2)
+
+
+    player1.current_animation = "idle"
+    player2.current_animation = "idle"
+
+    player1.image = player1.animations["idle"][0]
+    player2.image = player2.animations["idle"][0]
+
+    def draw_block_shield(surface, player):
+        if player.blocking:
+            w, h = player.rect.width, player.rect.height
+            
+            shield_w = int(w * 2.1)
+            shield_h = int(h * 1.3)
+            
+            shield_surface = pg.Surface((shield_w, shield_h), pg.SRCALPHA)
+            
+            ellipse_rect = shield_surface.get_rect()
+            
+            pg.draw.ellipse(shield_surface, BLOCK_SHIELD_COLOR, ellipse_rect)
+            
+            shield_rect = shield_surface.get_rect(center=player.rect.center)
+            
+            surface.blit(shield_surface, shield_rect)
+
+    def reset_game():
+        nonlocal ko_triggered, ko_y
+
+        ko_triggered = False
+        ko_timer = 0.0
+        ko_y = -200
+
+        player1.dead = False
+        player2.dead = False
+
+        player1.current_animation = "idle"
+        player2.current_animation = "idle"
+        player1.frame_index = 0
+        player2.frame_index = 0
+        player1.animation_timer = 0
+        player2.animation_timer = 0 
+
+        player1.health = 100
+        player2.health = 100
+
+        player1.special_attack = 100
+        player2.special_attack = 100
+
+        player1.block_stamina = player1.max_block_stamina
+        player2.block_stamina = player2.max_block_stamina
+
+        player1.rect.midbottom = (int(width * player1.x_ratio), int(0.8 * height))
+        player2.rect.midbottom = (int(width * player2.x_ratio), int(0.8 * height))
+
+        player1.gravity = 0
+        player2.gravity = 0
+
+        player1.attacking = False
+        player2.attacking = False
+
+        player1.active_hitbox = None
+        player2.active_hitbox = None
+
+        player1.facing = "right"
+        player2.facing = "left"
+
+
+        player1.stunned = False
+        player2.stunned = False
+        player1.combo_count = 0
+        player2.combo_count = 0
+        player1.knockback_velocity = 0
+        player2.knockback_velocity = 0
+
+
+        for f in fireballs:
+            f.kill()
+
+    def draw_bars(surface, width, height, player1, player2):
+        bar_height = 0.05 * height
+        seg_width = int(width * 0.03)
+        special_segments = 3
+        block_bar_height = bar_height / 2
+        spacing = 5
+        
+        pg.draw.rect(surface, (60, 60, 60), (0, 0, width * 0.35, bar_height))
+        pg.draw.rect(surface, (230, 230, 230), (0, 0, (width*0.35) * (player1.display_health/player1.max_health), bar_height))
+        color_hp1 = PLAYER1_COLOR if player1.health/player1.max_health >= 0.3 else (255, 80, 80)
+        pg.draw.rect(surface, color_hp1, (0, 0, (width*0.35) * (player1.health/player1.max_health), bar_height))
+
+        bar_y_special = bar_height + spacing
+        special_bar_width = seg_width * special_segments
+        bar_x = 0
+        pg.draw.rect(surface, (50,0,50), (bar_x, bar_y_special, special_bar_width, bar_height))
+        filled_width = special_bar_width * (player1.special_attack/player1.max_special)
+        pg.draw.rect(surface, PLAYER1_COLOR, (bar_x, bar_y_special, filled_width, bar_height))
+        for j in range(1, special_segments):
+            line_x = bar_x + j * seg_width
+            pg.draw.line(surface, (255,255,255), (line_x, bar_y_special), (line_x, bar_y_special+bar_height), 2)
+
+        bar_y_block = bar_y_special + bar_height + spacing
+        block_bar_width = seg_width * 3
+        bar_x = 0
+        pg.draw.rect(surface, (20,20,70), (bar_x, bar_y_block, block_bar_width, block_bar_height))
+        filled_width = block_bar_width * (player1.block_stamina/player1.max_block_stamina)
+        pg.draw.rect(surface, (0,200,255), (bar_x, bar_y_block, filled_width, block_bar_height))
+
+        bar_width_p2 = width * 0.35
+        pg.draw.rect(surface, (60,60,60), (width - bar_width_p2, 0, bar_width_p2, bar_height))
+        chip_width = bar_width_p2 * (player2.display_health/player2.max_health)
+        pg.draw.rect(surface, (230,230,230), (width - bar_width_p2 + bar_width_p2 - chip_width, 0, chip_width, bar_height))
+        real_width = bar_width_p2 * (player2.health/player2.max_health)
+        color_hp2 = PLAYER2_COLOR if player2.health/player2.max_health >= 0.3 else (255,80,80)
+        pg.draw.rect(surface, color_hp2, (width - bar_width_p2 + bar_width_p2 - real_width, 0, real_width, bar_height))
+
+        bar_y_special = bar_height + spacing
+        special_bar_width = seg_width * special_segments
+        bar_x = width - special_bar_width
+        pg.draw.rect(surface, (50,0,50), (bar_x, bar_y_special, special_bar_width, bar_height))
+        filled_width = special_bar_width * (player2.special_attack/player2.max_special)
+        pg.draw.rect(surface, PLAYER2_COLOR, (bar_x + special_bar_width - filled_width, bar_y_special, filled_width, bar_height))
+        for j in range(1, special_segments):
+            line_x = bar_x + j * seg_width
+            pg.draw.line(surface, (255,255,255), (line_x, bar_y_special), (line_x, bar_y_special+bar_height), 2)
+
+        bar_y_block = bar_y_special + bar_height + spacing
+        block_bar_width = seg_width * 3
+        bar_x = width - block_bar_width
+        pg.draw.rect(surface, (20,20,70), (bar_x, bar_y_block, block_bar_width, block_bar_height))
+        filled_width = block_bar_width * (player2.block_stamina/player2.max_block_stamina)
+        pg.draw.rect(surface, (0,200,255), (bar_x + block_bar_width - filled_width, bar_y_block, filled_width, block_bar_height))
+
+    loop_variable = True
+    while loop_variable:
+        dt = clock.tick(60) / 1000
+        width, height = screen.get_size()
+
+        for event in pg.event.get():
+            if event.type == pg.QUIT:
+                loop_variable = False
+            if event.type == pg.KEYDOWN:
+                if event.key == pg.K_f:
+                    fullscreen = not fullscreen
+                    if fullscreen:
+                        screen = pg.display.set_mode((0, 0), pg.FULLSCREEN)
+                if event.key == pg.K_ESCAPE:
+                    loop_variable = False
+            if ko_triggered and event.type == pg.MOUSEBUTTONDOWN:
+                if replay_rect.collidepoint(event.pos):
+                    reset_game()
+        
+        if background_image:
+            screen.blit(background_image, (0, 0))
+        else:
+            screen.fill(BG_COLOR)
+            
+        def handle_attack(attacker, defender):
+            now = pg.time.get_ticks() / 1000
+
+            if attacker.attack_type == "dash" and attacker.dashing and attacker.active_hitbox:
+                if attacker.active_hitbox.colliderect(defender.rect) and defender not in attacker.hit_opponents:
+                    defender.deal_damage(30)
+                    defender.stunned = True
+                    defender.stun_timer = 0.4
+                    defender.knockback_velocity = 15 if attacker.facing == "right" else -15
+
+                    attacker.hit_opponents.append(defender)
+                    attacker.dash_hit_this_dash = True
+                return  
+
+            if attacker.active_hitbox and attacker.active_hitbox.colliderect(defender.rect) and defender not in attacker.hit_opponents:
+
+                # Combo reset
+                if now - attacker.last_hit_time > attacker.combo_reset_time:
+                    attacker.combo_count = 0
+
+                attacker.combo_count += 1
+                attacker.last_hit_time = now
+                attacker.hit_opponents.append(defender)
+
+                damage = 5 
+
+                # damage based on height
+                if attacker.attack_type == "shockwave":
+                    floor = 0.8 * height
+                    height_above_ground = max(0, floor - attacker.rect.bottom)
+                    damage = attacker.shockwave_base_damage + height_above_ground * attacker.shockwave_height_multiplier
+
+                # Apply damage if not blocking
+                if not defender.blocking:
+                    defender.deal_damage(damage)
+
+                # Special gain
+                attacker.gain_special(damage * 1.5)
+                defender.gain_special(damage * 0.5)
+
+                # Stun on combo
+                if attacker.combo_count >= 4:
+                    defender.stunned = True
+                    defender.stun_timer = 0.7
+                    defender.knockback_velocity = 18 if attacker.facing == "right" else -18
+                    attacker.combo_count = 0
+        players.update(dt, width, height) 
+
+        if not ko_triggered:
+        
+            # Update fireballs 
+            fireballs.update(dt) 
+
+            player1.gain_special(10 * dt)
+            player2.gain_special(10 * dt)
+            
+            # Basic Attack 
+            handle_attack(player1, player2)
+            handle_attack(player2, player1)
+
+                # Fireball collisions
+            for fireball in fireballs:
+                if fireball.owner != player1 and fireball.rect.colliderect(player1.rect):
+
+                    attacker = fireball.owner
+                    defender = player1
+                    now = pg.time.get_ticks() / 1000
+
+                    # Combo timing
+                    if now - attacker.last_hit_time > attacker.combo_reset_time:
+                        attacker.combo_count = 0
+
+                    attacker.combo_count += 1
+                    attacker.last_hit_time = now
+
+                    if not defender.blocking:
+                        defender.deal_damage(fireball.damage)
+
+                    attacker.gain_special(fireball.damage * 1.5)
+                    defender.gain_special(fireball.damage * 0.5)
+
+                    # SPECIAL FINISHER KNOCKBACK
+                    if attacker.combo_count >= 4:
+                        defender.stunned = True
+                        defender.stun_timer = 0.9
+                        defender.knockback_velocity = 35 if attacker.facing == "right" else -35
+                        attacker.combo_count = 0
+
+                    fireball.kill()
+
+
+                elif fireball.owner != player2 and fireball.rect.colliderect(player2.rect):
+
+                    attacker = fireball.owner
+                    defender = player2
+                    now = pg.time.get_ticks() / 1000
+
+                    if now - attacker.last_hit_time > attacker.combo_reset_time:
+                        attacker.combo_count = 0
+
+                    attacker.combo_count += 1
+                    attacker.last_hit_time = now
+
+                    if not defender.blocking:
+                        defender.deal_damage(fireball.damage)
+
+                    attacker.gain_special(fireball.damage * 1.5)
+                    defender.gain_special(fireball.damage * 0.5)
+
+                    if attacker.combo_count >= 4:
+                        defender.stunned = True
+                        defender.stun_timer = 0.9
+                        defender.knockback_velocity = 35 if attacker.facing == "right" else -35
+                        attacker.combo_count = 0
+
+                    fireball.kill()
+
+        all_sprites.draw(screen) 
+
+        draw_block_shield(screen, player1)
+        draw_block_shield(screen, player2)
+
+        if player1.active_hitbox:
+            pg.draw.rect(screen, PLAYER1_COLOR, player1.active_hitbox, 2)
+        if player2.active_hitbox:
+            pg.draw.rect(screen, PLAYER2_COLOR, player2.active_hitbox, 2)
+
+        draw_bars(screen, width, height, player1, player2)
+
+        #KO
+        if not ko_triggered and (player1.health <= 0 or player2.health <= 0):
+            ko_triggered = True
+            ko_y = -0.4 * height
+
+        if ko_triggered:
+            ko_y += 600 * dt
+        if ko_y > 0.3 * height:
+            ko_y = 0.3 * height
+
+        if ko_triggered:
+            try:
+                ko_font = pg.font.Font("ARCADECLASSIC.ttf", int(0.33*height))
+            except:
+                ko_font = pg.font.SysFont("Arial", int(0.25*height), bold=True)
+
+            winner_font = pg.font.SysFont("Arial", int(0.12*height), bold=True)
+            ko_text_str = "KO"
+            main_color = (255, 255, 255) 
+            
+            # Draw background splatter for effect
+            ko_text_str = "KO"
+            ko_main = ko_font.render(ko_text_str, True, (255, 255, 255))
+            ko_rect = ko_main.get_rect(center=(width // 2, int(ko_y)))
+
+            # --- SPLATTER / SPRAY LAYERS ---
+          # --- OLD SPLATTER (same style as before) ---
+            for _ in range(15):
+                offset_x = r.randint(-15, 15)
+                offset_y = r.randint(-5, 5)
+                splatter = ko_font.render(ko_text_str, True, (230, 230, 230))
+                splatter_rect = splatter.get_rect(center=(width//2 + offset_x, int(ko_y) + offset_y))
+                screen.blit(splatter, splatter_rect)
+            screen.blit(ko_main, ko_rect)
+
+
+            # Draw Winner text
+            winner_text_str = "WINNER PLAYER 2" if player1.health <= 0 else "WINNER PLAYER 1"
+            winner_color = PLAYER2_COLOR if player1.health <= 0 else PLAYER1_COLOR
+            winner_text = winner_font.render(winner_text_str, True, winner_color)
+            winner_rect = winner_text.get_rect(center=(width//2, int(ko_y + 0.15*height)))
+            screen.blit(winner_text, winner_rect)
+
+            # Draw replay button
+            button_width = width * 0.25
+            button_height = height * 0.1
+            button_x = width//2 - button_width//2
+            button_y = int(ko_y + 0.30 * height)
+
+            replay_rect = pg.Rect(button_x, button_y, button_width, button_height)
+            pg.draw.rect(screen, (200,200,200), replay_rect, border_radius=10)
+            font = pg.font.SysFont("Arial", int(0.07 * height), bold=True)
+            text = font.render("REPLAY", True, (255, 255, 255))
+            text_rect = text.get_rect(center=replay_rect.center)
+            screen.blit(text, text_rect)
+            
+            
+        
+
+        pg.display.update()
+
+if __name__ == "__main__":
+    main_menu()
+    pg.quit()
+    sys.exit()
+
+def get_lan_ip():
+    """
+    Best-effort LAN IP (the one your friend on the same Wi-Fi can use).
+    """
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+
+def draw_host_ip_overlay():
+    ip_font = pg.font.SysFont("Arial", 28, bold=True)
+    host_ip = get_lan_ip()
+    ip_txt = ip_font.render(f"Host IP: {host_ip}:{ONLINE_PORT}", True, (255,255,255))
+    screen.blit(ip_txt, (20, height - 40))
+
+def encode(obj: dict) -> bytes:
+    return json.dumps(obj, separators=(",", ":")).encode("utf-8")
+
+def decode(data: bytes) -> dict:
+    try:
+        return json.loads(data.decode("utf-8"))
+    except Exception:
+        return {}
+pg.init()
+
+PLAYER1_COLOR = (255, 0, 0)
+PLAYER2_COLOR = (0, 0, 255)
+def load_animation(path, frame_count):
+    sheet = pg.image.load(path).convert_alpha()
+    sheet_width, sheet_height = sheet.get_size()
+    frame_width = sheet_width // frame_count
+
+    frames = []
+    for i in range(frame_count):
+        frame = sheet.subsurface(pg.Rect(i * frame_width, 0, frame_width, sheet_height))
+        frame = pg.transform.scale(frame, (PLAYER_WIDTH, PLAYER_HEIGHT))
+        frames.append(frame)
+
+    return frames
+
+# --- SCREEN SETUP ---
+screen = pg.display.set_mode((0,0), pg.FULLSCREEN)
+pg.display.set_caption(':D')
+clock = pg.time.Clock()
+width, height = screen.get_size()
+PLAYER_WIDTH = int(width * 0.12)
+PLAYER_HEIGHT = int(height * 0.28)
+width_2, height_2 = width // 4, height // 6
+
+# --- FUNCTION TO SCALE IMAGE TO FULLSCREEN ---
+def transform(transf):
+    return pg.transform.scale(transf, (width, height))
+
+def transform_choose(transf, num):
+    transf_rect = transf.get_rect()
+    new_transf = pg.transform.smoothscale(transf, (transf_rect.width // num, transf_rect.height // num))
+    return new_transf
+    #--- FUNCTION TO TEST WHETHER THERE SHOULD BE A BUTTON OR NOT ---
+def draw_text_box(text, x, y, max_width, font, color, line_spacing=6):
+    words = str(text).split(" ")
+    line = ""
+    y_offset = 0
+
+    for word in words:
+        test_line = (line + word + " ").strip()
+        if font.size(test_line)[0] <= max_width:
+            line = test_line + " "
+        else:
+            surf = font.render(line.strip(), True, color)
+            screen.blit(surf, (x, y + y_offset))
+            y_offset += font.get_height() + line_spacing
+            line = word + " "
+
+    if line.strip():
+        surf = font.render(line.strip(), True, color)
+        screen.blit(surf, (x, y + y_offset))
+
+# --------------------
+#     BUTTON CLASS
+# --------------------
+class Button():
+    
+    def __init__(self, text_i, x_pos, y_pos, colour, colour2, size):
+        self.text_i = text_i
+        self.x_pos = x_pos
+        self.y_pos = y_pos
+        self.colour = colour
+        self.colour2 = colour2
+        self.size = size
+
+        self.font = pg.font.SysFont('Cambria', self.size)
+        self.text_surf = self.font.render(text_i, True, self.colour)
+        self.text_rect = self.text_surf.get_rect(center=(x_pos, y_pos))
+
+    def Update(self):
+        self.text_rect.center = (self.x_pos, self.y_pos)
+        screen.blit(self.text_surf, self.text_rect)
+
+    def Pos_Check(self, position):
+        return self.text_rect.collidepoint(position)
+
+    def Col_Update(self, position):
+        if self.Pos_Check(position):
+            self.text_surf = self.font.render(self.text_i, True, self.colour2)
+        else:
+            self.text_surf = self.font.render(self.text_i, True, self.colour)
+        # also resync rect because text size can change slightly
+        self.text_rect = self.text_surf.get_rect(center=(self.x_pos, self.y_pos))
+# --------------------
+#  IMAGE BUTTON CLASS
+# --------------------
+class Image_Button():
+    def __init__(self, image, x_pos, y_pos, hover_scale=0.9):
+        self.x_pos = x_pos
+        self.y_pos = y_pos
+
+        self.image_normal = image
+        self.full_image = image  # optional (you override for backgrounds)
+
+        # Hover image (smaller)
+        w, h = self.image_normal.get_size()
+        self.image_hover = pg.transform.smoothscale(
+            self.image_normal,
+            (int(w * hover_scale), int(h * hover_scale))
+        )
+
+        # IMPORTANT: hitbox stays the same size always (normal image size)
+        self.hit_rect = self.image_normal.get_rect(center=(x_pos, y_pos))
+
+    def Pos_check(self, pos):
+        return self.hit_rect.collidepoint(pos)
+
+    def Update(self, mouse_pos):
+        hovering = self.Pos_check(mouse_pos)
+        img = self.image_hover if hovering else self.image_normal
+
+        draw_rect = img.get_rect(center=(self.x_pos, self.y_pos))
+        screen.blit(img, draw_rect)
+
+        # keep hitbox centered if x/y changes
+        self.hit_rect.center = (self.x_pos, self.y_pos)
+# --------------------
+def draw_bars(surface, width, height, player1, player2):
+    bar_height = 0.05 * height
+    seg_width = width * 0.03
+    special_segments = 3
+    block_bar_height = bar_height / 2
+    spacing = 5
+        
+    pg.draw.rect(surface, (60, 60, 60), (0, 0, width * 0.35, bar_height))
+    pg.draw.rect(surface, (230, 230, 230), (0, 0, (width*0.35) * (player1.display_health/player1.max_health), bar_height))
+    color_hp1 = PLAYER1_COLOR if player1.health/player1.max_health >= 0.3 else (255, 80, 80)
+    pg.draw.rect(surface, color_hp1, (0, 0, (width*0.35) * (player1.health/player1.max_health), bar_height))
+
+    bar_y_special = bar_height + spacing
+    special_bar_width = seg_width * special_segments
+    bar_x = 0
+    pg.draw.rect(surface, (50,0,50), (bar_x, bar_y_special, special_bar_width, bar_height))
+    filled_width = special_bar_width * (player1.special_attack/player1.max_special)
+    pg.draw.rect(surface, PLAYER1_COLOR, (bar_x, bar_y_special, filled_width, bar_height))
+    for j in range(1, special_segments):
+        line_x = bar_x + j * seg_width
+        pg.draw.line(surface, (255,255,255), (line_x, bar_y_special), (line_x, bar_y_special+bar_height), 2)
+
+    bar_y_block = bar_y_special + bar_height + spacing
+    block_bar_width = seg_width * 3
+    bar_x = 0
+    pg.draw.rect(surface, (20,20,70), (bar_x, bar_y_block, block_bar_width, block_bar_height))
+    filled_width = block_bar_width * (player1.block_stamina/player1.max_block_stamina)
+    pg.draw.rect(surface, (0,200,255), (bar_x, bar_y_block, filled_width, block_bar_height))
+
+    bar_width_p2 = width * 0.35
+    pg.draw.rect(surface, (60,60,60), (width - bar_width_p2, 0, bar_width_p2, bar_height))
+    chip_width = bar_width_p2 * (player2.display_health/player2.max_health)
+    pg.draw.rect(surface, (230,230,230), (width - bar_width_p2 + bar_width_p2 - chip_width, 0, chip_width, bar_height))
+    real_width = bar_width_p2 * (player2.health/player2.max_health)
+    color_hp2 = PLAYER2_COLOR if player2.health/player2.max_health >= 0.3 else (255,80,80)
+    pg.draw.rect(surface, color_hp2, (width - bar_width_p2 + bar_width_p2 - real_width, 0, real_width, bar_height))
+
+    bar_y_special = bar_height + spacing
+    special_bar_width = seg_width * special_segments
+    bar_x = width - special_bar_width
+    pg.draw.rect(surface, (50,0,50), (bar_x, bar_y_special, special_bar_width, bar_height))
+    filled_width = special_bar_width * (player2.special_attack/player2.max_special)
+    pg.draw.rect(surface, PLAYER2_COLOR, (bar_x + special_bar_width - filled_width, bar_y_special, filled_width, bar_height))
+    for j in range(1, special_segments):
+        line_x = bar_x + j * seg_width
+        pg.draw.line(surface, (255,255,255), (line_x, bar_y_special), (line_x, bar_y_special+bar_height), 2)
+
+    bar_y_block = bar_y_special + bar_height + spacing
+    block_bar_width = seg_width * 3
+    bar_x = width - block_bar_width
+    pg.draw.rect(surface, (20,20,70), (bar_x, bar_y_block, block_bar_width, block_bar_height))
+    filled_width = block_bar_width * (player2.block_stamina/player2.max_block_stamina)
+    pg.draw.rect(surface, (0,200,255), (bar_x + block_bar_width - filled_width, bar_y_block, filled_width, block_bar_height))
+
+# --- MAIN MENU BACKGROUNDS ---
+c1_bg = transform(pg.image.load("C:/Users/saira/OneDrive/Desktop/Python projects/Fighter game//RESOURCES/FIGHTER_GAME/menu_backgrounds/craftpix-net-558275-free-sky-with-clouds-background-pixel-art-set/Clouds/Clouds 1/1.png").convert_alpha())
+c2_bg = transform(pg.image.load("C:/Users/saira/OneDrive/Desktop/Python projects/Fighter game//RESOURCES/FIGHTER_GAME/menu_backgrounds/craftpix-net-558275-free-sky-with-clouds-background-pixel-art-set/Clouds/Clouds 1/2.png").convert_alpha())
+c4_bg = transform(pg.image.load("C:/Users/saira/OneDrive/Desktop/Python projects/Fighter game//RESOURCES/FIGHTER_GAME/menu_backgrounds/craftpix-net-558275-free-sky-with-clouds-background-pixel-art-set/Clouds/Clouds 1/4.png").convert_alpha())
+
+# --- SPRITE IMAGES ---
+pink_path = "C:/Users/saira/OneDrive/Desktop/Python projects/Fighter game/RESOURCES/FIGHTER_GAME/sprites/1 Pink_Monster/"
+
+pink_animations = {
+    "idle": load_animation(pink_path + "Pink_Monster_Idle_4.png", 4),
+    "run": load_animation(pink_path + "Pink_Monster_Run_6.png", 6),
+    "walk": load_animation(pink_path + "Pink_Monster_Walk_6.png", 6),
+    "jump": load_animation(pink_path + "Pink_Monster_Jump_8.png", 8),
+    "double_jump": load_animation(pink_path + "Double_Jump_Dust_5.png", 5),
+    "attack1": load_animation(pink_path + "Pink_Monster_Attack1_4.png", 4),
+    "attack2": load_animation(pink_path + "Pink_Monster_Attack2_6.png", 6),
+    "hurt": load_animation(pink_path + "Pink_Monster_Hurt_4.png", 4),
+    "death": load_animation(pink_path + "Pink_Monster_Death_8.png", 8),
+    "climb": load_animation(pink_path + "Pink_Monster_Climb_4.png", 4),
+}
+
+owl_path = "C:/Users/saira/OneDrive/Desktop/Python projects/Fighter game/RESOURCES/FIGHTER_GAME/sprites/2 Owlet_Monster/"
+
+owl_animations = {
+    "idle": load_animation(owl_path + "Owlet_Monster_Idle_4.png", 4),
+    "run": load_animation(owl_path + "Owlet_Monster_Run_6.png", 6),
+    "walk": load_animation(owl_path + "Owlet_Monster_Walk_6.png", 6),
+    "jump": load_animation(owl_path + "Owlet_Monster_Jump_8.png", 8),
+    "double_jump": load_animation(owl_path + "Double_Jump_Dust_5.png", 5),
+    "attack1": load_animation(owl_path + "Owlet_Monster_Attack1_4.png", 4),
+    "attack2": load_animation(owl_path + "Owlet_Monster_Attack2_6.png", 6),
+    "hurt": load_animation(owl_path + "Owlet_Monster_Hurt_4.png", 4),
+    "death": load_animation(owl_path + "Owlet_Monster_Death_8.png", 8),
+    "climb": load_animation(owl_path + "Owlet_Monster_Climb_4.png", 4),
+}
+Dude_path = "C:/Users/saira/OneDrive/Desktop/Python projects/Fighter game/RESOURCES/FIGHTER_GAME/sprites/3 Dude_Monster/"
+
+Dude_animations = {
+    "idle": load_animation(Dude_path + "Dude_Monster_Idle_4.png", 4),
+    "run": load_animation(Dude_path + "Dude_Monster_Run_6.png", 6),
+    "walk": load_animation(Dude_path + "Dude_Monster_Walk_6.png", 6),
+    "jump": load_animation(Dude_path + "Dude_Monster_Jump_8.png", 8),
+    "double_jump": load_animation(Dude_path + "Double_Jump_Dust_5.png", 5),
+    "attack1": load_animation(Dude_path + "Dude_Monster_Attack1_4.png", 4),
+    "attack2": load_animation(Dude_path + "Dude_Monster_Attack2_6.png", 6),
+    "hurt": load_animation(Dude_path + "Dude_Monster_Hurt_4.png", 4),
+    "death": load_animation(Dude_path + "Dude_Monster_Death_8.png", 8),
+    "climb": load_animation(Dude_path + "Dude_Monster_Climb_4.png", 4),
+}
+
+character_info = {
+    "Pink_Monster": {
+        "name": "Pink Monster",
+        "bio": "A strong but slow fighter with crushing attacks and high defense."
+    },
+    "Owl_Monster": {
+        "name": "Owlet",
+        "bio": "Fast and agile fighter. Specialises in aerial attacks."
+    },
+    "Dude_Monster": {
+        "name": "Dude",
+        "bio": "Balanced warrior with reliable combos and good mobility."
+    }
+}
+CHAR_SPECIAL = {
+    "Pink_Monster": "shockwave",
+    "Owl_Monster": "dash",
+    "Dude_Monster": "heal",
+    # if you add a 4th/5th character later:
+    # "SomeCharacter": "heal",
+    # "SomeOther": "joker",
+}
+pink_preview = pink_animations["idle"][0]
+owl_preview = owl_animations["idle"][0]
+dude_preview = Dude_animations["idle"][0]
+
+button_y = int(height * 0.55)
+spacing = int(width * 0.15)
+
+def make_preview_smaller(img, scale=0.75):
+    w, h = img.get_size()
+    return pg.transform.smoothscale(img, (int(w*scale), int(h*scale)))
+
+pink_mon_button = Image_Button(make_preview_smaller(pink_preview, 0.75), spacing * 1.5, button_y)
+owlet_button = Image_Button(make_preview_smaller(owl_preview, 0.75), spacing * 3, button_y)
+dude_button = Image_Button(make_preview_smaller(dude_preview, 0.75), spacing * 4.5, button_y)
+
+
+chars = [pink_mon_button, owlet_button, dude_button]
+
+
+# --- MAIN GAME BACKGROUNDS --- 
+
+bam_bridge_full = pg.image.load('C:/Users/saira/OneDrive/Desktop/Python projects/Fighter game/RESOURCES/FIGHTER_GAME/game_backgrounds/1/bamboo bridge.png').convert_alpha()
+bam_bridge = transform_choose(bam_bridge_full, 17)
+bam_bridge_button = Image_Button(bam_bridge, width * 0.28, height * (0.85))
+bam_bridge_button.full_image = bam_bridge_full
+
+for_bridge_full = pg.image.load('C:/Users/saira/OneDrive/Desktop/Python projects/Fighter game/RESOURCES/FIGHTER_GAME/game_backgrounds/2/forest bridge.png').convert_alpha()
+for_bridge = transform_choose(for_bridge_full, 17)
+for_bridge_button = Image_Button(for_bridge, width * 0.44, height * (0.85))
+for_bridge_button.full_image = for_bridge_full
+
+sky_bridge_full = pg.image.load('C:/Users/saira/OneDrive/Desktop/Python projects/Fighter game/RESOURCES/FIGHTER_GAME/game_backgrounds/3/sky bridge.png').convert_alpha()
+sky_bridge = transform_choose(sky_bridge_full, 17)
+sky_bridge_button = Image_Button(sky_bridge, width * 0.60, height * (0.85))
+sky_bridge_button.full_image = sky_bridge_full
+
+cas_bridge_full = pg.image.load('C:/Users/saira/OneDrive/Desktop/Python projects/Fighter game/RESOURCES/FIGHTER_GAME/game_backgrounds/4/castle bridge.png').convert_alpha()
+cas_bridge = transform_choose(cas_bridge_full, 17)
+cas_bridge_button = Image_Button(cas_bridge, width * 0.76 , height * (0.85))
+cas_bridge_button.full_image = cas_bridge_full
+
+background_map = [bam_bridge_button, for_bridge_button, sky_bridge_button, cas_bridge_button]
+back_ground_map = None
+# ----- STORING -----
+
+player_1_char = None
+player_2_char = None
+
+
+# --------------------
+#     GLOBAL BUTTONS
+# --------------------
+start = Button("START", width // 2, int(height * 0.75), (255,195,77), (230,153,0), 150)
+leave = Button("BACK", int(width * 0.05), int(height * 0.05), (204,41,0), (153,31,0), 50)
+confirm = Button("CONFIRM", width * 0.90, height * 0.9, (111, 207, 87), (77, 143, 60), 50)
+go = Button('GO', int(width*0.8), int(height*0.75), (201,24,24), (117,14,14), 50)# --------------------
+
+def scale_to_fit(img, max_w, max_h):
+    w, h = img.get_size()
+    scale = min(max_w / w, max_h / h)
+    new_size = (int(w * scale), int(h * scale))
+    return pg.transform.smoothscale(img, new_size)
+def online_menu():
+    host_btn = Button("HOST", width//2, int(height*0.48), (255,195,77), (230,153,0), 140)
+    join_btn = Button("JOIN", width//2, int(height*0.65), (255,195,77), (230,153,0), 140)
+
+    title_font = pg.font.Font(None, 110)
+
+    while True:
+        screen.blit(c1_bg, (0,0)); screen.blit(c2_bg, (0,0)); screen.blit(c4_bg, (0,0))
+        mouse_pos = pg.mouse.get_pos()
+
+        title = title_font.render("ONLINE", True, (201,24,24))
+        screen.blit(title, title.get_rect(center=(width//2, int(height*0.18))))
+
+        for event in pg.event.get():
+            if event.type == pg.QUIT:
+                pg.quit(); sys.exit()
+            if event.type == pg.MOUSEBUTTONDOWN:
+                if leave.Pos_Check(mouse_pos):
+                    return
+                if host_btn.Pos_Check(mouse_pos):
+                    # Host chooses ONLY their own character + map
+                    host_char = player_select_single(1)
+                    if host_char is None:
+                        return
+                    global player_1_char
+                    player_1_char = host_char
+                    background()   # when GO pressed it will call run_online_host(...)
+                    return
+                if join_btn.Pos_Check(mouse_pos):
+                    ip_entry_screen() # joiner needs host IP
+                    return
+
+        host_btn.Update(); host_btn.Col_Update(mouse_pos)
+        join_btn.Update(); join_btn.Col_Update(mouse_pos)
+        leave.Update(); leave.Col_Update(mouse_pos)
+
+        ip_font = pg.font.Font(None, 40)
+        host_ip = get_lan_ip()
+        ip_text = ip_font.render(f"Host IP: {host_ip}:{ONLINE_PORT}", True, (255,255,255))
+        screen.blit(ip_text, (int(width*0.03), int(height*0.92)))
+
+        pg.display.update()
+        clock.tick(60)
+def mode_select():
+    global GAME_MODE, ONLINE_ROLE
+    GAME_MODE = "local"
+    ONLINE_ROLE = None
+
+    local_btn = Button("LOCAL", width//2, int(height*0.48), (255,195,77), (230,153,0), 140)
+    online_btn = Button("ONLINE", width//2, int(height*0.65), (255,195,77), (230,153,0), 140)
+    title_font = pg.font.Font(None, 110)
+
+    while True:
+        screen.blit(c1_bg, (0,0)); screen.blit(c2_bg, (0,0)); screen.blit(c4_bg, (0,0))
+        mouse_pos = pg.mouse.get_pos()
+
+        title = title_font.render("CHOOSE MODE", True, (201,24,24))
+        screen.blit(title, title.get_rect(center=(width//2, int(height*0.18))))
+
+        for event in pg.event.get():
+            if event.type == pg.QUIT:
+                pg.quit(); sys.exit()
+            if event.type == pg.MOUSEBUTTONDOWN:
+                if leave.Pos_Check(mouse_pos):
+                    return
+                if local_btn.Pos_Check(mouse_pos):
+                    GAME_MODE = "local"
+                    ONLINE_ROLE = None
+                    player_select()
+                    return
+                if online_btn.Pos_Check(mouse_pos):
+                    GAME_MODE = "online"
+                    online_menu()
+                    return
+
+        local_btn.Update(); local_btn.Col_Update(mouse_pos)
+        online_btn.Update(); online_btn.Col_Update(mouse_pos)
+        leave.Update(); leave.Col_Update(mouse_pos)
+        pg.display.update()
+        clock.tick(60)
+
+
+def ip_entry_screen():
+    
+    global JOIN_IP
+    ip = ""
+    font = pg.font.Font(None, 70)
+    small = pg.font.Font(None, 40)
+    connect_btn = Button("CONNECT", width//2, int(height*0.72), (111,207,87), (77,143,60), 80)
+
+    global player_2_char
+    if player_2_char is None:
+        pick = player_select_single(2)
+        if pick is None:
+            return
+        player_2_char = pick
+    while True:
+        mouse_pos = pg.mouse.get_pos()
+        screen.blit(c1_bg, (0,0))
+        screen.blit(c2_bg, (0,0))
+        screen.blit(c4_bg, (0,0))
+
+        # ---- GREY PANEL ----
+        panel_w = int(width * 0.6)
+        panel_h = int(height * 0.4)
+        panel_x = width // 2 - panel_w // 2
+        panel_y = height // 2 - panel_h // 2
+
+        # Semi-transparent surface
+        panel_surface = pg.Surface((panel_w, panel_h), pg.SRCALPHA)
+        panel_surface.fill((40, 40, 40, 220))  # dark grey with transparency
+        screen.blit(panel_surface, (panel_x, panel_y))
+
+        # Border
+        pg.draw.rect(screen, (220,220,220), (panel_x, panel_y, panel_w, panel_h), 3, border_radius=20)
+
+        # ---- TEXT ----
+        label = font.render("ENTER HOST IP", True, (201,24,24))
+        screen.blit(label, label.get_rect(center=(width//2, panel_y + 70)))
+
+        # Input text
+        ip_display = ip if ip else "_"
+        ip_surf = font.render(ip_display, True, (255,255,255))
+        screen.blit(ip_surf, ip_surf.get_rect(center=(width//2, panel_y + 150)))
+
+        # Hint text
+        hint = small.render("Example: 192.168.1.23", True, (200,200,200))
+        screen.blit(hint, hint.get_rect(center=(width//2, panel_y + 220)))
+
+        for event in pg.event.get():
+            if event.type == pg.QUIT:
+                pg.quit(); sys.exit()
+            if event.type == pg.KEYDOWN:
+                if event.key == pg.K_BACKSPACE:
+                    ip = ip[:-1]
+                elif event.key == pg.K_RETURN and ip:
+                    JOIN_IP = ip
+                    run_online_client(JOIN_IP, player_id=2, chosen_char=player_2_char)  
+                    return
+                else:
+                    ch = event.unicode
+                    if ch.isdigit() or ch == ".":
+                        ip += ch
+
+            if event.type == pg.MOUSEBUTTONDOWN:
+                if leave.Pos_Check(mouse_pos):
+                    return
+
+                if connect_btn.Pos_Check(mouse_pos) and ip:
+                    JOIN_IP = ip
+                    run_online_client(JOIN_IP, player_id=2, chosen_char=player_2_char)
+                    return
+
+        connect_btn.Update(); connect_btn.Col_Update(mouse_pos)
+        leave.Update(); leave.Col_Update(mouse_pos)
+        pg.display.update()
+        clock.tick(60)
+def main_menu():
+    while True:
+        screen.blit(c1_bg, (0,0))
+        screen.blit(c2_bg, (0,0))
+        screen.blit(c4_bg, (0,0))
+        mouse_pos = pg.mouse.get_pos()
+
+        for event in pg.event.get():
+            if event.type == pg.QUIT:
+                pg.quit()
+                sys.exit()
+
+            if event.type == pg.MOUSEBUTTONDOWN:
+                if leave.Pos_Check(mouse_pos):
+                    pg.quit()
+                    sys.exit()
+                elif start.Pos_Check(mouse_pos):
+                    mode_select()
+        
+                
+        start.Update()
+        leave.Update()
+        start.Col_Update(mouse_pos)
+        leave.Col_Update(mouse_pos)
+
+        pg.display.update()
+        clock.tick(60)
+
+# --------------------
+#     PLAYER SELECT
+# --------------------
+def player_select():
+    selected_for_preview = None
+    PS_text = 'P1 SELECT CHARACTER'
+    x = True
+    temp = None
+    player_now = 1
+    ready_to_fight = False
+    
+    while True:
+        global player_1_char
+        global player_2_char
+
+        player_text1 = pg.font.Font(None, 75)
+        player_text1_real = player_text1.render(str(PS_text), False, (201, 24, 24))
+        player_text1_rect = player_text1_real.get_rect(center = (width // 2, height * 0.1))
+
+        screen.blit(c1_bg, (0,0))
+        screen.blit(c2_bg, (0,0))
+        screen.blit(c4_bg, (0,0))
+        Gbg = pg.draw.rect(screen, (163, 162, 162), (width * 0.1455, height * 0.225, width * (200/1920), height * (600/1080) + (height // 80), ), 0, 50) # last element of bracket = height
+        screen.blit(player_text1_real, player_text1_rect)
+        
+        # LEFT area = character buttons
+        left_panel = pg.Rect(width*0.05, height*0.15, width*0.2, height*0.7)
+        pg.draw.rect(screen, (40,40,40), left_panel, border_radius=25)
+        # --- layout character buttons inside the left panel ---
+           # vertical position inside panel
+        # --- layout character buttons inside the left panel (VERTICAL) ---
+        count = len(chars)
+        max_h = max(btn.image_normal.get_height() for btn in chars)
+        padding = 2                 # tweak this
+        gap_y = max_h + padding
+        # Vertical spacing between sprites
+        total_height = (count - 1) * gap_y
+        start_y = left_panel.centery - total_height // 2
+       
+        for i, btn in enumerate(chars):
+            btn.x_pos = left_panel.centerx
+            btn.y_pos = start_y + i * gap_y # Stack vertically centered        # RIGHT info panel
+        panel_x = int(width * 0.30)
+        panel_y = int(height * 0.15)
+        panel_w = int(width * 0.4)
+        panel_h = int(height * 0.7)
+
+        info_panel = pg.Rect(panel_x, panel_y, panel_w, panel_h)
+        pg.draw.rect(screen, (30,30,30), info_panel, border_radius=25)
+        pg.draw.rect(screen, (200,200,200), info_panel, 3, border_radius=25)        
+        pg.draw.rect(screen, (40,40,40), info_panel, border_radius=30)     
+        
+       
+        mouse_pos = pg.mouse.get_pos()
+
+        for event in pg.event.get():
+            if event.type == pg.QUIT:
+                pg.quit()
+                sys.exit()
+
+            if event.type == pg.MOUSEBUTTONDOWN:
+
+                if leave.Pos_Check(mouse_pos):
+                    return  # go back to main menu
+                
+                for char in chars:
+                    if char.Pos_check(mouse_pos):
+                        if char == pink_mon_button:
+                            temp = "Pink_Monster"
+                        elif char == owlet_button:
+                            temp = "Owl_Monster"
+                        elif char == dude_button:
+                            temp = "Dude_Monster"
+                        
+                if confirm.Pos_Check(mouse_pos) and temp != None:
+
+                    if player_now == 1:
+                        player_1_char = temp
+                        temp = None
+                        player_now = 2
+                        PS_text = 'PLAYER 2 SELECT YOUR CHARACTER'
+                        
+
+                    elif player_now == 2:
+                        
+                        if temp == player_1_char:
+                            PS_text = 'ALREADY SELECTED TRY AGAIN'
+                            temp = None
+                            
+
+                        else:
+                            player_2_char = temp
+                            temp = None
+                            background()   # instantly go to map select
+                            return         # stop the player_select loop
+
+               
+                # draw confirm button only if a character is selected
+
+        if ready_to_fight:
+            go.x_pos = panel_x + panel_w // 2
+            go.y_pos = panel_y + panel_h - 60
+            go.text_rect.center = (go.x_pos, go.y_pos)
+        
+            go.Update()
+            go.Col_Update(mouse_pos)
+
+        # draw confirm button only if a character is selected
+        if temp is not None:
+            confirm.Update()
+            confirm.Col_Update(mouse_pos)
+
+            info = character_info[temp]
+
+            # Name
+            name_font = pg.font.Font(None, 50)
+            name_surf = name_font.render(info["name"], True, (255,255,255))
+            screen.blit(name_surf, (panel_x + 20, panel_y + 20))
+
+            # Preview image
+            if temp == "Pink_Monster":
+                preview = pink_animations["idle"][0]
+            elif temp == "Owl_Monster":
+                preview = owl_animations["idle"][0]
+            elif temp == "Dude_Monster":
+                preview = Dude_animations["idle"][0]
+
+            preview = transform_choose(preview, 2)
+            preview_rect = preview.get_rect(center=(panel_x + panel_w//2, panel_y + 200))
+            screen.blit(preview, preview_rect)
+
+            # Bio text
+            bio_font = pg.font.Font(None, 32)
+            draw_text_box(info["bio"], panel_x + 20, panel_y + 350, panel_w - 40, bio_font, (220,220,220))
+
+            special_name = CHAR_SPECIAL[temp]
+            special_font = pg.font.Font(None, 32)
+            special_surf = special_font.render(f"Special: {special_name.upper()}", True, (200, 200, 50))
+            screen.blit(special_surf, (panel_x + 20, panel_y + 310))
+
+        pink_mon_button.Update(mouse_pos)
+        owlet_button.Update(mouse_pos)
+        dude_button.Update(mouse_pos)          
+
+        leave.Col_Update(mouse_pos)
+        leave.Update()
+
+        # draw confirm button only if a character is selected
+
+        pg.display.update()
+        clock.tick(60)
+def player_select_single(player_num: int):
+    """
+    Returns a character key like "Pink_Monster" / "Owl_Monster" / "Dude_Monster"
+    player_num: 1 or 2 (just affects the text)
+    """
+    PS_text = f'P{player_num} SELECT CHARACTER'
+    temp = None
+
+    while True:
+        player_text1 = pg.font.Font(None, 75)
+        player_text1_real = player_text1.render(str(PS_text), False, (201, 24, 24))
+        player_text1_rect = player_text1_real.get_rect(center=(width // 2, height * 0.1))
+
+        screen.blit(c1_bg, (0,0)); screen.blit(c2_bg, (0,0)); screen.blit(c4_bg, (0,0))
+        screen.blit(player_text1_real, player_text1_rect)
+
+        left_panel = pg.Rect(width*0.05, height*0.15, width*0.2, height*0.7)
+        pg.draw.rect(screen, (40,40,40), left_panel, border_radius=25)
+
+        count = len(chars)
+        max_h = max(btn.image_normal.get_height() for btn in chars)
+        padding = 2
+        gap_y = max_h + padding
+        total_height = (count - 1) * gap_y
+        start_y = left_panel.centery - total_height // 2
+
+        for i, btn in enumerate(chars):
+            btn.x_pos = left_panel.centerx
+            btn.y_pos = start_y + i * gap_y
+
+        panel_x = int(width * 0.30)
+        panel_y = int(height * 0.15)
+        panel_w = int(width * 0.4)
+        panel_h = int(height * 0.7)
+
+        info_panel = pg.Rect(panel_x, panel_y, panel_w, panel_h)
+        pg.draw.rect(screen, (40,40,40), info_panel, border_radius=30)
+
+        mouse_pos = pg.mouse.get_pos()
+
+        for event in pg.event.get():
+            if event.type == pg.QUIT:
+                pg.quit(); sys.exit()
+
+            if event.type == pg.MOUSEBUTTONDOWN:
+                if leave.Pos_Check(mouse_pos):
+                    return None
+
+                for char in chars:
+                    if char.Pos_check(mouse_pos):
+                        if char == pink_mon_button: temp = "Pink_Monster"
+                        elif char == owlet_button:  temp = "Owl_Monster"
+                        elif char == dude_button:   temp = "Dude_Monster"
+
+                if confirm.Pos_Check(mouse_pos) and temp is not None:
+                    return temp
+
+        # preview + confirm
+        if temp is not None:
+            confirm.Update(); confirm.Col_Update(mouse_pos)
+            info = character_info[temp]
+
+            name_font = pg.font.Font(None, 50)
+            screen.blit(name_font.render(info["name"], True, (255,255,255)), (panel_x + 20, panel_y + 20))
+
+            if temp == "Pink_Monster": preview = pink_animations["idle"][0]
+            elif temp == "Owl_Monster": preview = owl_animations["idle"][0]
+            else: preview = Dude_animations["idle"][0]
+
+            preview = transform_choose(preview, 2)
+            preview_rect = preview.get_rect(center=(panel_x + panel_w//2, panel_y + 200))
+            screen.blit(preview, preview_rect)
+
+            bio_font = pg.font.Font(None, 32)
+            draw_text_box(info["bio"], panel_x + 20, panel_y + 350, panel_w - 40, bio_font, (220,220,220))
+
+            special_name = CHAR_SPECIAL[temp]
+            special_font = pg.font.Font(None, 32)
+            screen.blit(special_font.render(f"Special: {special_name.upper()}", True, (200,200,50)),
+                        (panel_x + 20, panel_y + 310))
+
+        for btn in chars:
+            btn.Update(mouse_pos)
+
+        leave.Update(); leave.Col_Update(mouse_pos)
+        pg.display.update()
+        clock.tick(60)
+
+def background():
+    bgs_text = 'SELECT BACKGROUND'
+    global back_ground_map
+
+    selected_full = None
+    preview = None
+    preview_rect = None
+
+    while True:
+        screen.blit(c1_bg, (0,0))
+        screen.blit(c2_bg, (0,0))
+        screen.blit(c4_bg, (0,0))
+
+        mouse_pos = pg.mouse.get_pos()
+
+        # --- MOVE THUMBNAILS UP so they don't cover CONFIRM ---
+        thumb_y = int(height * 0.86)   # was 0.80
+
+        # force all thumbnail buttons to sit on the same line (every frame)
+        bam_bridge_button.y_pos = thumb_y
+        for_bridge_button.y_pos = thumb_y
+        sky_bridge_button.y_pos = thumb_y
+        cas_bridge_button.y_pos = thumb_y
+
+
+
+        confirm.y_pos = int(height * 0.74)   # put it above the bar
+        confirm.x_pos = int(width * 0.90)    # keep it on the right (or change)
+        confirm.text_rect.center = (confirm.x_pos, confirm.y_pos)
+        
+        # --- DRAW OUTLINE STRIP BEHIND THUMBNAILS (INSIDE LOOP) ---
+        strip_h = int(height * 0.16)
+        strip_y = thumb_y - strip_h // 2
+        strip_rect = pg.Rect(int(width * 0.12), strip_y, int(width * 0.76), strip_h)
+
+        pg.draw.rect(screen, (25,25,25), strip_rect, border_radius=20)
+        pg.draw.rect(screen, (220,220,220), strip_rect, 3, border_radius=20)
+
+        # title text
+        bg_select = pg.font.Font(None, 75)
+        bg_select_text = bg_select.render(bgs_text, False, (201, 24, 24))
+        bg_select_rect = bg_select_text.get_rect(center=(width // 2, int(height * 0.18)))
+        screen.blit(bg_select_text, bg_select_rect)
+
+        for event in pg.event.get():
+            if event.type == pg.QUIT:
+                pg.quit()
+                sys.exit()
+
+            if event.type == pg.MOUSEBUTTONDOWN:
+                if leave.Pos_Check(mouse_pos):
+                    return
+
+                for bg_btn in background_map:
+                    if bg_btn.Pos_check(mouse_pos):
+                        selected_full = bg_btn.full_image
+                        preview = scale_to_fit(selected_full, int(width * 0.52), int(height * 0.45))
+                        preview_rect = preview.get_rect(center=(width // 2, int(height*0.47)))
+                        bgs_text = "CLICK CONFIRM"
+                        break
+
+                if confirm.Pos_Check(mouse_pos) and selected_full is not None:
+                    back_ground_map = pg.transform.smoothscale(selected_full, (width, height))
+                    bgs_text = "READY TO FIGHT"
+
+                if bgs_text == "READY TO FIGHT" and go.Pos_Check(mouse_pos):
+                    if GAME_MODE == "local":
+                        run_game(player_1_char, player_2_char, back_ground_map,
+                                CHAR_SPECIAL[player_1_char], CHAR_SPECIAL[player_2_char])
+                    else:
+                        placeholder_p2 = "Pink_Monster"
+                        run_online_host(player_1_char, placeholder_p2, back_ground_map,
+                                        CHAR_SPECIAL[player_1_char], CHAR_SPECIAL[placeholder_p2])
+                        return
+
+        if preview is not None:
+            # --- PREVIEW OUTLINE CARD ---
+            pad = 18  # how much space around the preview
+            card = preview_rect.inflate(pad * 2, pad * 2)
+
+            pg.draw.rect(screen, (25,25,25), card, border_radius=25)          # dark fill
+            pg.draw.rect(screen, (220,220,220), card, 3, border_radius=25)    # outline
+
+            # draw the preview on top
+            screen.blit(preview, preview_rect)
+
+        leave.Col_Update(mouse_pos); leave.Update()
+        confirm.Update(); confirm.Col_Update(mouse_pos)
+
+        if bgs_text == "READY TO FIGHT":
+            go.x_pos = width // 2
+            go.y_pos = int(height * 0.1)
+            go.text_rect.center = (go.x_pos, go.y_pos)
+            go.Update()
+            go.Col_Update(mouse_pos)
+
+        for bg_btn in background_map:
+            bg_btn.Update(mouse_pos)
+
+        pg.display.update()
+        clock.tick(60)
+# =========================================================
+#                ONLINE ENGINE (INTEGRATED)
+# =========================================================
+
+ALL_CHARACTER_ANIMATIONS = {
+    "Pink_Monster": pink_animations,
+    "Owl_Monster": owl_animations,
+    "Dude_Monster": Dude_animations
+}
+
+# frame counts for animation stepping on server
+FRAME_COUNTS = {c: {k: len(v) for k, v in anims.items()} for c, anims in ALL_CHARACTER_ANIMATIONS.items()}
+
+def online_get_inputs(keys) -> dict:
+    # ONLINE: same keys for both players (each PC controls its own player)
+    return {
+        "left":   int(keys[pg.K_a]),
+        "right":  int(keys[pg.K_d]),
+        "jump":   int(keys[pg.K_w]),
+        "attack": int(keys[pg.K_e]),
+        "special":int(keys[pg.K_r]),
+        "block":  int(keys[pg.K_t]),
+    }
+
+class OnlineServer(threading.Thread):
+    def __init__(self, p1_char, p2_char, bg_index, p1_special, p2_special, port=ONLINE_PORT):
+        super().__init__(daemon=True)
+        self.port = port
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.bind(("0.0.0.0", port))
+        self.sock.setblocking(False)
+        self.joined = {1: False, 2: False}
+        self.started = False
+        self.player_addr = {}
+        self.inputs = {
+            1: {"left":0,"right":0,"jump":0,"attack":0,"special":0,"block":0},
+            2: {"left":0,"right":0,"jump":0,"attack":0,"special":0,"block":0},
+        }
+
+        self.sim_w, self.sim_h = 800, 500
+        self.floor = int(self.sim_h * 0.85)
+
+        self.p1_char = p1_char
+        self.p2_char = p2_char
+        self.bg_index = bg_index
+
+        self.p1_special = p1_special
+        self.p2_special = p2_special
+
+        self.running = True
+        self.ko = False
+        self.fireballs = []
+
+        self.p1 = self.make_player(pid=1, x_ratio=0.2, typeofspecial=p1_special)
+        self.p2 = self.make_player(pid=2, x_ratio=0.8, typeofspecial=p2_special)
+
+    def make_player(self, pid, x_ratio, typeofspecial):
+        return {
+            "pid": pid,
+            "x_ratio": x_ratio,
+            "x": int(self.sim_w * x_ratio),
+            "y": self.floor,
+            "w": 60,
+            "h": 140,
+            "vx": 0.0,
+            "vy": 0.0,
+            "speed": self.sim_w * 0.198,
+            "facing": "right" if x_ratio < 0.5 else "left",
+            "hp": 100, "hpMax": 100, "hpDisp": 100.0,
+            "special": 100.0, "specialMax": 300.0,
+            "block": 100.0, "blockMax": 100.0,
+            "blocking": False,
+            "attacking": False,
+            "attackType": "normal",
+            "attackTimer": 0.0,
+            "hitbox": None,
+            "stunned": False,
+            "stunTimer": 0.0,
+            "knock": 0.0,
+            "jumpCount": 0,
+            "maxJumps": 2,
+            "doubleJumpT": 0.0,
+            "doubleJumpDur": 0.15,
+            "canSpecial": True,
+            "specialCD": 0.0,
+            "specialCDTime": 0.5,
+            "typeofspecial": typeofspecial,
+
+            # animation synced to clients
+            "anim": "idle",
+            "frame": 0,
+            "animT": 0.0,
+            "animSpeed": 0.10,
+
+            # dash
+            "dashing": False,
+            "dashTimer": 0.0,
+            "dashTime": 0.08,
+            "dashSpeed": 1800.0,
+            "hitOpponents": set(),
+            "combo": 0,
+            "lastHit": 0.0
+        }
+
+    def rect(self, p):
+        return pg.Rect(int(p["x"]), int(p["y"] - p["h"]), int(p["w"]), int(p["h"]))
+
+    def is_airborne(self, p):
+        return (p["y"] < self.floor)
+
+    def reset(self):
+        self.ko = False
+        self.fireballs.clear()
+        for p, x_ratio in (self.p1, 0.2), (self.p2, 0.8):
+            p["x"] = int(self.sim_w * x_ratio)
+            p["y"] = self.floor
+            p["vx"] = 0; p["vy"] = 0
+            p["hp"] = 100; p["hpDisp"] = 100.0
+            p["special"] = 100.0
+            p["block"] = p["blockMax"]
+            p["blocking"] = False
+            p["attacking"] = False
+            p["attackType"] = "normal"
+            p["attackTimer"] = 0.0
+            p["hitbox"] = None
+            p["stunned"] = False
+            p["stunTimer"] = 0.0
+            p["knock"] = 0.0
+            p["jumpCount"] = 0
+            p["doubleJumpT"] = 0.0
+            p["canSpecial"] = True
+            p["specialCD"] = 0.0
+            p["dashing"] = False
+            p["dashTimer"] = 0.0
+            p["combo"] = 0
+            p["hitOpponents"] = set()
+            p["anim"] = "idle"
+            p["frame"] = 0
+            p["animT"] = 0.0
+
+    def start_attack(self, p):
+        p["attacking"] = True
+        p["attackTimer"] = 0.2
+        w, h = p["w"], p["h"]
+        r = self.rect(p)
+        if self.is_airborne(p):
+            hb = pg.Rect(r.centerx - int(0.2*w), r.top - int(0.5*h), int(0.4*w), int(0.5*h))
+        else:
+            if p["facing"] == "right":
+                hb = pg.Rect(r.right, r.top + int(0.2*h), int(0.35*w), int(0.6*h))
+            else:
+                hb = pg.Rect(r.left - int(0.35*w), r.top + int(0.2*h), int(0.35*w), int(0.6*h))
+        p["hitbox"] = hb
+        p["hitOpponents"] = set()
+
+    def spawn_fireball(self, p):
+        r = self.rect(p)
+        self.fireballs.append({
+            "x": r.centerx,
+            "y": r.centery - 10,
+            "dir": p["facing"],
+            "speed": 800.0,
+            "dmg": 25,
+            "owner": p["pid"]
+        })
+
+    def start_special(self, p):
+        p["special"] -= 100
+        p["canSpecial"] = False
+        p["specialCD"] = p["specialCDTime"]
+
+        chosen = p["typeofspecial"]
+        if chosen == "fireball":
+            p["attackType"] = "fireball"
+            self.spawn_fireball(p)
+        elif chosen == "dash":
+            p["attackType"] = "dash"
+            p["dashing"] = True
+            p["dashTimer"] = p["dashTime"]
+            p["hitbox"] = None
+            p["hitOpponents"] = set()
+        elif chosen == "heal":
+            p["hp"] = min(p["hpMax"], p["hp"] + 20)
+        elif chosen == "shockwave":
+            p["attackType"] = "shockwave"
+            rct = self.rect(p)
+            radius = int(max(p["w"], p["h"]) * 1.85)
+            hb = pg.Rect(rct.centerx - radius//2, rct.centery - radius//2, radius, radius)
+            p["hitbox"] = hb
+            p["attacking"] = True
+            p["attackTimer"] = 0.3
+            p["hitOpponents"] = set()
+
+    def choose_anim(self, p, inp):
+        if p["hp"] <= 0:
+            return "death"
+        if p["attacking"]:
+            return "attack1"
+        if p["stunned"]:
+            return "hurt"
+        if self.is_airborne(p):
+            if p["doubleJumpT"] > 0:
+                return "double_jump"
+            return "jump"
+        if inp["left"] or inp["right"]:
+            return "run"
+        return "idle"
+
+    def step_player(self, p, inp, dt):
+        if p["hp"] <= 0:
+            return
+
+        # stun timer
+        if p["stunned"]:
+            p["stunTimer"] -= dt
+            if p["stunTimer"] <= 0:
+                p["stunned"] = False
+
+        # special cooldown
+        if not p["canSpecial"]:
+            p["specialCD"] -= dt
+            if p["specialCD"] <= 0:
+                p["canSpecial"] = True
+
+        # block
+        if inp["block"] and not p["stunned"]:
+            p["blocking"] = p["block"] > 0
+        else:
+            p["blocking"] = False
+
+        if p["blocking"]:
+            p["block"] -= 100 * dt
+            if p["block"] < 0:
+                p["block"] = 0
+                p["blocking"] = False
+        else:
+            p["block"] += 30 * dt
+            if p["block"] > p["blockMax"]:
+                p["block"] = p["blockMax"]
+
+        # dash movement
+        if p["dashing"]:
+            direction = 1 if p["facing"] == "right" else -1
+            p["x"] += direction * p["dashSpeed"] * dt
+            p["dashTimer"] -= dt
+
+            # dash hitbox
+            rct = self.rect(p)
+            hb = pg.Rect(rct.left, rct.top, rct.width, rct.height)
+            p["hitbox"] = hb
+
+            if p["dashTimer"] <= 0:
+                p["dashing"] = False
+                p["hitbox"] = None
+                if p["attackType"] == "dash":
+                    p["attackType"] = "normal"
+
+        # move left/right (only if not dashing)
+        if (not p["dashing"]) and (not p["stunned"]):
+            if inp["left"]:
+                p["x"] -= p["speed"] * dt
+                p["facing"] = "left"
+            if inp["right"]:
+                p["x"] += p["speed"] * dt
+                p["facing"] = "right"
+
+        # clamp walls
+        p["x"] = max(0, min(self.sim_w - p["w"], p["x"]))
+
+        # jump
+        if inp["jump"] and not p["stunned"]:
+            JUMP_V = self.sim_h * (-0.036)
+            if p["jumpCount"] < p["maxJumps"]:
+                p["vy"] = JUMP_V
+                p["jumpCount"] += 1
+                if p["jumpCount"] == 2:
+                    p["doubleJumpT"] = p["doubleJumpDur"]
+
+        # attack
+        if inp["attack"] and (not p["attacking"]) and (not p["blocking"]) and (not p["stunned"]):
+            self.start_attack(p)
+
+        # special
+        if inp["special"] and p["special"] >= 100 and p["canSpecial"] and (not p["attacking"]) and (not p["blocking"]) and (not p["stunned"]):
+            self.start_special(p)
+
+        # attack timer
+        if p["attacking"]:
+            p["attackTimer"] -= dt
+            if p["attackTimer"] <= 0:
+                p["attacking"] = False
+                p["hitbox"] = None
+                p["hitOpponents"] = set()
+
+        # gravity
+        g = self.sim_h * 0.002
+        p["vy"] += g
+        p["y"] += p["vy"]
+
+        if p["y"] >= self.floor:
+            p["y"] = self.floor
+            p["vy"] = 0
+            p["jumpCount"] = 0
+
+        # double jump timer
+        if p["doubleJumpT"] > 0:
+            p["doubleJumpT"] -= dt
+
+        # passive special gain
+        p["special"] = min(p["specialMax"], p["special"] + 10 * dt)
+
+    def apply_hits(self, attacker, defender):
+        if not attacker["hitbox"]:
+            return
+        hb = attacker["hitbox"]
+        if hb.colliderect(self.rect(defender)) and defender["pid"] not in attacker["hitOpponents"]:
+            attacker["hitOpponents"].add(defender["pid"])
+
+            dmg = 5
+            if attacker["attackType"] == "shockwave":
+                height_above = max(0, self.floor - defender["y"])
+                dmg = 15 + height_above * 0.08
+
+            if not defender["blocking"]:
+                defender["hp"] = max(0, defender["hp"] - dmg)
+                defender["stunned"] = True
+                defender["stunTimer"] = 0.25
+
+            # KO check
+            if defender["hp"] <= 0:
+                self.ko = True
+
+    def step_fireballs(self, dt):
+        for fb in list(self.fireballs):
+            if fb["dir"] == "right":
+                fb["x"] += fb["speed"] * dt
+            else:
+                fb["x"] -= fb["speed"] * dt
+
+            # offscreen
+            if fb["x"] < -50 or fb["x"] > self.sim_w + 50:
+                self.fireballs.remove(fb)
+                continue
+
+            # collision
+            fb_rect = pg.Rect(int(fb["x"]-10), int(fb["y"]-10), 20, 20)
+            if fb["owner"] != 1 and fb_rect.colliderect(self.rect(self.p1)):
+                if not self.p1["blocking"]:
+                    self.p1["hp"] = max(0, self.p1["hp"] - fb["dmg"])
+                self.fireballs.remove(fb)
+                if self.p1["hp"] <= 0:
+                    self.ko = True
+            elif fb["owner"] != 2 and fb_rect.colliderect(self.rect(self.p2)):
+                if not self.p2["blocking"]:
+                    self.p2["hp"] = max(0, self.p2["hp"] - fb["dmg"])
+                self.fireballs.remove(fb)
+                if self.p2["hp"] <= 0:
+                    self.ko = True
+
+    def pack_state(self):
+        def hb_dict(hb):
+            if hb is None:
+                return None
+            return {"x": hb.x, "y": hb.y, "w": hb.width, "h": hb.height}
+
+        return {
+            "started": self.started,
+            "joined": {"p1": self.joined[1], "p2": self.joined[2]},
+            "sim": {"w": self.sim_w, "h": self.sim_h},
+            "bg_index": self.bg_index,
+            "p1_char": self.p1_char,
+            "p2_char": self.p2_char,
+            "ko": self.ko,
+            "p1": {
+                "x": self.p1["x"], "y": self.p1["y"], "w": self.p1["w"], "h": self.p1["h"],
+                "hp": self.p1["hp"], "hpMax": self.p1["hpMax"], "hpDisp": self.p1["hpDisp"],
+                "special": self.p1["special"], "specialMax": self.p1["specialMax"],
+                "block": self.p1["block"], "blockMax": self.p1["blockMax"],
+                "facing": self.p1["facing"], "blocking": self.p1["blocking"],
+                "hitbox": hb_dict(self.p1["hitbox"]),
+                "anim": self.p1["anim"], "frame": self.p1["frame"],
+            },
+            "p2": {
+                "x": self.p2["x"], "y": self.p2["y"], "w": self.p2["w"], "h": self.p2["h"],
+                "hp": self.p2["hp"], "hpMax": self.p2["hpMax"], "hpDisp": self.p2["hpDisp"],
+                "special": self.p2["special"], "specialMax": self.p2["specialMax"],
+                "block": self.p2["block"], "blockMax": self.p2["blockMax"],
+                "facing": self.p2["facing"], "blocking": self.p2["blocking"],
+                "hitbox": hb_dict(self.p2["hitbox"]),
+                "anim": self.p2["anim"], "frame": self.p2["frame"],
+            },
+            "fireballs": [{"x": f["x"], "y": f["y"], "dir": f["dir"]} for f in self.fireballs]
+        }
+
+    def run(self):
+        last = time.time()
+        while self.running:
+            now = time.time()
+            dt = now - last
+            last = now
+            if dt > 0.05:
+                dt = 0.05
+
+            # receive packets
+            for _ in range(60):
+                try:
+                    data, addr = self.sock.recvfrom(MAX_PACKET)
+                except BlockingIOError:
+                    break
+                msg = decode(data)
+                if not msg:
+                    continue
+
+                if "join" in msg:
+                    pid = int(msg["join"])
+                    self.player_addr[pid] = addr
+                    self.joined[pid] = True  # ✅ IMPORTANT
+
+                    if pid == 2 and msg.get("char"):
+                        self.p2_char = msg["char"]
+                        self.p2["typeofspecial"] = CHAR_SPECIAL[self.p2_char]
+
+                    # start when both players present
+                    if self.joined[1] and self.joined[2]:
+                        self.started = True
+
+                if "player" in msg and "inputs" in msg:
+                    pid = int(msg["player"])
+                    if pid in self.inputs:
+                        inp = msg["inputs"]
+                        self.inputs[pid] = {k: int(bool(inp.get(k, 0))) for k in self.inputs[pid].keys()}
+
+                if msg.get("replay") == 1:
+                    self.reset()
+
+            if self.started and (not self.ko):
+                self.step_player(self.p1, self.inputs[1], dt)
+                self.step_player(self.p2, self.inputs[2], dt)
+
+                self.apply_hits(self.p1, self.p2)
+                self.apply_hits(self.p2, self.p1)
+
+                self.step_fireballs(dt)
+
+                # chip health smoothing
+                self.p1["hpDisp"] += (self.p1["hp"] - self.p1["hpDisp"]) * 0.12
+                self.p2["hpDisp"] += (self.p2["hp"] - self.p2["hpDisp"]) * 0.12
+
+            # animation stepping (server decides anim+frame)
+            for p, inp, char in ((self.p1, self.inputs[1], self.p1_char), (self.p2, self.inputs[2], self.p2_char)):
+                nxt = self.choose_anim(p, inp)
+                if nxt != p["anim"]:
+                    p["anim"] = nxt
+                    p["frame"] = 0
+                    p["animT"] = 0.0
+                p["animT"] += dt
+                if p["animT"] >= p["animSpeed"]:
+                    p["animT"] = 0.0
+                    n = FRAME_COUNTS[char].get(p["anim"], 1)
+                    if p["anim"] == "death":
+                        p["frame"] = min(p["frame"] + 1, n - 1)
+                    else:
+                        p["frame"] = (p["frame"] + 1) % n
+
+            # send state
+            pkt = encode(self.pack_state())
+            for pid, addr in list(self.player_addr.items()):
+                try:
+                    self.sock.sendto(pkt, addr)
+                except Exception:
+                    pass
+
+            time.sleep(max(0.0, (1.0 / 60.0) - (time.time() - now)))
+
+        self.sock.close()
+
+def run_online_host(p1_char, p2_char, background_surface, p1_special, p2_special):
+    # background_surface is already your chosen full-screen background
+    # pick a bg_index so joiner can draw same if they have same bg list (optional)
+    global SELECTED_BG_INDEX
+    bg_index = SELECTED_BG_INDEX
+    server = OnlineServer(p1_char, p2_char, bg_index, p1_special, p2_special)
+    server.start()
+
+    # host connects to itself as player 1
+    run_online_client("127.0.0.1", player_id=1, forced_bg=background_surface)
+
+    server.running = False
+
+def run_online_client(server_ip, player_id, forced_bg=None, chosen_char=None):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setblocking(False)
+    sock.sendto(encode({"join": player_id, "char": chosen_char}), (server_ip, ONLINE_PORT))
+
+    state_lock = threading.Lock()
+    inputs_lock = threading.Lock()
+    latest_inputs = {"left":0,"right":0,"jump":0,"attack":0,"special":0,"block":0}
+    state = None
+
+    def draw_bars_online(surface, width, height, s):
+        # make tiny objects with the attributes your draw_bars expects
+        class P: pass
+        p1 = P(); p2 = P()
+        p1.health = s["p1"]["hp"]; p1.max_health = s["p1"]["hpMax"]; p1.display_health = s["p1"]["hpDisp"]
+        p2.health = s["p2"]["hp"]; p2.max_health = s["p2"]["hpMax"]; p2.display_health = s["p2"]["hpDisp"]
+
+        # if your draw_bars uses these too:
+        p1.special_attack = s["p1"].get("special", 0); p1.max_special = s["p1"].get("specialMax", 300)
+        p2.special_attack = s["p2"].get("special", 0); p2.max_special = s["p2"].get("specialMax", 300)
+        p1.block_stamina = s["p1"].get("block", 0); p1.max_block_stamina = s["p1"].get("blockMax", 100)
+        p2.block_stamina = s["p2"].get("block", 0); p2.max_block_stamina = s["p2"].get("blockMax", 100)
+
+        draw_bars(surface, width, height, p1, p2)
+
+
+
+
+
+
+
+
+
+    def net_thread():
+        nonlocal state
+        TICK = 1.0 / 60.0
+        while True:
+            with inputs_lock:
+                to_send = dict(latest_inputs)
+            try:
+                sock.sendto(encode({"player": player_id, "inputs": to_send}), (server_ip, ONLINE_PORT))
+            except Exception:
+                pass
+
+            try:
+                for _ in range(15):
+                    try:
+                        data, _ = sock.recvfrom(8192)
+                    except BlockingIOError:
+                        break
+                    s = decode(data)
+                    if s:
+                        with state_lock:
+                            state = s
+            except Exception:
+                pass
+
+            time.sleep(TICK)
+
+    threading.Thread(target=net_thread, daemon=True).start()
+
+    # main client loop uses your current pygame screen
+    running = True
+    while running:
+        dt = clock.tick(120) / 1000.0
+        mouse_pos = pg.mouse.get_pos()
+
+        for event in pg.event.get():
+            if event.type == pg.QUIT:
+                pg.quit(); sys.exit()
+            if event.type == pg.KEYDOWN and event.key == pg.K_ESCAPE:
+                running = False
+            if event.type == pg.KEYDOWN and event.key == pg.K_RETURN:
+                with state_lock:
+                    s = state
+                if s and s.get("ko"):
+                    try:
+                        sock.sendto(encode({"replay": 1}), (server_ip, ONLINE_PORT))
+                    except Exception:
+                        pass
+
+        pg.event.pump()
+        keys = pg.key.get_pressed()
+        with inputs_lock:
+            latest_inputs = online_get_inputs(keys)
+
+        with state_lock:
+            s = copy.deepcopy(state)
+
+        # --- WAIT / CONNECT UI ---
+        if not s:
+            screen.fill((20,20,20))
+            f = pg.font.SysFont("Arial", 40, bold=True)
+            t = f.render("CONNECTING...", True, (255,255,255))
+            screen.blit(t, t.get_rect(center=(width//2, height//2)))
+            pg.display.update()
+            continue
+
+        if not s.get("started", False):
+            screen.fill((15, 15, 15))
+            f = pg.font.SysFont("Arial", 60, bold=True)
+
+            joined = s.get("joined", {})
+            if joined.get("p1") and not joined.get("p2"):
+                msg = "WAITING FOR PLAYER 2..."
+            else:
+                msg = "WAITING FOR HOST..."
+
+            t = f.render(msg, True, (255,255,255))
+            screen.blit(t, t.get_rect(center=(width//2, height//2)))
+
+            if player_id == 1:
+                draw_host_ip_overlay()
+
+            pg.display.update()
+            continue
+
+        # draw background
+        if forced_bg is not None:
+            screen.blit(forced_bg, (0,0))
+        else:
+            idx = int(s.get("bg_index", 0))
+            idx = max(0, min(idx, len(BG_FULL_LIST) - 1))
+            screen.blit(BG_FULL_LIST[idx], (0,0))
+        # scale sim->screen
+        sim_w = s["sim"]["w"]
+        sim_h = s["sim"]["h"]
+
+        scale = min(width / sim_w, height / sim_h)   # uniform scale
+        offset_x = (width  - sim_w * scale) / 2
+        offset_y = (height - sim_h * scale) / 2
+
+        def to_screen(x, y):
+            return (int(offset_x + x * scale), int(offset_y + y * scale))
+
+        def draw_player(p_dict, char_name):
+            anims = ALL_CHARACTER_ANIMATIONS[char_name]
+            anim = p_dict.get("anim", "idle")
+            frame = int(p_dict.get("frame", 0))
+            frames = anims.get(anim, anims["idle"])
+            frame = max(0, min(frame, len(frames)-1))
+            img = frames[frame]
+
+            if p_dict.get("facing") == "left":
+                img = pg.transform.flip(img, True, False)
+
+            x, bottom = to_screen(p_dict["x"], p_dict["y"])
+            screen.blit(img, (x, bottom - img.get_height()))
+
+            w = img.get_width()
+            h = img.get_height()
+
+
+            if p_dict.get("blocking"):
+                shield_w = int(w * 2.1)
+                shield_h = int(h * 1.3)
+                shield_surface = pg.Surface((shield_w, shield_h), pg.SRCALPHA)
+                pg.draw.ellipse(shield_surface, (50, 50, 255, 150), shield_surface.get_rect())
+                cx = x + w//2
+                cy = bottom - h//2
+                screen.blit(shield_surface, shield_surface.get_rect(center=(cx, cy)))
+
+        draw_player(s["p1"], s["p1_char"])
+        draw_player(s["p2"], s["p2_char"])
+
+        # fireballs
+        for f in s.get("fireballs", []):
+            fx = int(f["x"] * scale)
+            fy = int(f["y"] * scale)
+            pg.draw.circle(screen, (255,165,0), (fx, fy), 10)
+
+        # bars (re-use your existing draw_bars? easiest: just call your local draw_bars from run_game is nested)
+        # Minimal quick UI text:
+        font = pg.font.SysFont("Arial", 26, bold=True)
+        draw_bars_online(screen, width, height, s)
+
+        if s.get("ko"):
+            ko_font = pg.font.SysFont("Arial", int(0.20*height), bold=True)
+            text = ko_font.render("KO", True, (255,255,255))
+            screen.blit(text, text.get_rect(center=(width//2, int(0.30*height))))
+
+            win_font = pg.font.SysFont("Arial", int(0.06*height), bold=True)
+            winner = "WINNER PLAYER 2" if s["p1"]["hp"] <= 0 else "WINNER PLAYER 1"
+            wtxt = win_font.render(winner, True, (255,255,0))
+            screen.blit(wtxt, wtxt.get_rect(center=(width//2, int(0.45*height))))
+
+            hint = pg.font.SysFont("Arial", int(0.04*height), bold=True).render("Press ENTER to replay", True, (240,240,240))
+            screen.blit(hint, hint.get_rect(center=(width//2, int(0.55*height))))
+
+        pg.display.update()
+
+    sock.close()
+def run_game(player1_sprite, player2_sprite, background_image, p1_special, p2_special):
+    global screen
+    global width, height
+
+    initial_width, initial_height = 800, 500
+    clock = pg.time.Clock()
+    pg.display.set_caption('Fighter Game')
+    
+    fireball_image = pg.image.load("C:/Users/saira/OneDrive/Desktop/Python projects/Fighter game/GAME/fireball.png").convert_alpha()
+
+    
+    pg.display.set_icon(fireball_image)
+    fullscreen = False
+    ko_triggered = False
+    ko_y = -200
+    replay_rect = None
+
+    BG_COLOR = (30, 30, 30)
+    PLAYER1_COLOR = (255, 0, 0)
+    PLAYER2_COLOR = (0, 0, 255)
+    FIREBALL_COLOR = (255, 165, 0) # Orange
+    BLOCK_SHIELD_COLOR = (50, 50, 255, 150) 
+
+    # --- Global Groups ---
+    all_sprites = pg.sprite.Group()
+    fireballs = pg.sprite.Group()
+
+    class Fireball(pg.sprite.Sprite):
+        def __init__(self, start_x, start_y, direction, color, screen_width):
+            super().__init__()
+            self.direction = direction  # left or right
+            self.speed = 0.5*width
+            self.damage = 25
+            self.screen_width = screen_width
+            self.owner = None
+
+            self.original_image = fireball_image
+            self.image = pg.transform.scale(self.original_image, (30, 30)) 
+            if self.direction == "left":
+                self.image = pg.transform.flip(self.image, True, False)
+            self.rect = self.image.get_rect(center=(start_x, start_y))
+
+        def update(self, dt, *args): 
+        
+            if self.direction == "right":
+                self.rect.x += self.speed * dt
+            else:
+                self.rect.x -= self.speed * dt
+            
+            if self.rect.right < 0 or self.rect.left > self.screen_width:
+                self.kill()
+
+    # --- Player Class ---
+    class Player(pg.sprite.Sprite):
+        def __init__(self, x_ratio, color, controls, typeofspecial):
+            super().__init__()
+            self.color = color
+            self.x_ratio = x_ratio
+            self.dead = False
+            self.animations = None
+            self.current_animation = "idle"
+            self.frame_index = 0
+            self.animation_timer = 0
+            self.animation_speed = 0.1
+            
+            self.chosen_sprite = None  # store chosen sprite
+
+            self.image = pg.Surface((50, 100))
+            self.image.fill(color)
+            self.rect = self.image.get_rect() 
+            self.controls = controls
+            self.speed = 380
+            self.gravity = 0
+            self.attacking = False
+            self.blocking = False
+            self.active_hitbox = None
+            self.hit_opponents = []
+            self.facing = "right" if x_ratio < 0.5 else "left"
+            self.health = 100
+            self.max_health = 100
+            
+            self.typeofspecial = typeofspecial
+            self.special_attack = 100
+            self.max_special = 300
+            self.special_cost = 100
+            self.can_special = True 
+            self.special_cooldown_timer = 0
+            self.special_cooldown_time = 0.5 
+
+            self.block_stamina = 100
+            self.max_block_stamina = 100
+            self.block_drain_rate = 100
+            self.block_recover_rate = 30
+            
+            self.combo_count = 0
+            self.last_hit_time = 0
+            self.combo_reset_time = 0.8
+
+            self.stunned = False
+            self.stun_timer = 0
+            self.knockback_velocity = 0
+            
+            self.shockwave_damage = 30
+            self.shockwave_base_damage = 15
+            self.shockwave_height_multiplier = 0.08
+
+            self.attack_type = "normal"
+
+            self.max_jumps = 2
+            self.jump_count = 0
+            self.jump_pressed = False
+            self.double_jump_timer = 0
+            self.double_jump_duration = 0.15  # seconds (tweak 0.10–0.20)
+            # Dash state
+            self.dashing = False
+            self.dash_speed = 1.5*width
+            self.dash_time = 0.08
+            self.dash_timer = 0
+            self.dash_trail = []  
+            self.dash_trail_max = 10  
+
+            self.max_dash_charges = 3
+            self.dash_charges = 0
+            self.dash_hit_this_dash = False
+
+            self.display_health = self.health
+            
+            if self.typeofspecial == "joker":
+                self.joker_deck = ["fireball", "dash", "heal", "shockwave"]  # list
+                r.shuffle(self.joker_deck)  # shuffle 
+                self.joker_index = 0          # points to next
+                self.joker_current = self.joker_deck[self.joker_index]
+            else:
+                self.joker_deck = None
+                self.joker_index = None
+                self.joker_current = None
+
+            self.flying = False
+            self.fly_timer = 0
+            self.fly_duration = 20  # seconds
+            self.fly_speed = 500
+            self.particles = []
+        
+        def update_animation(self, dt):
+            frames = self.animations[self.current_animation]
+            if len(frames) == 0:
+                return
+
+            self.animation_timer += dt
+            if self.animation_timer >= self.animation_speed:
+                self.animation_timer = 0
+
+                if self.current_animation == "death":
+                    # stop on last frame
+                    if self.frame_index < len(frames) - 1:
+                        self.frame_index += 1
+                else:
+                    self.frame_index = (self.frame_index + 1) % len(frames)
+
+            self.image = frames[self.frame_index]
+            if self.facing == "left":
+                self.image = pg.transform.flip(self.image, True, False)
+            
+        def initial_setup(self, screen_width, screen_height):
+            floor = int(screen_height * 0.85)            
+            self.image = self.animations["idle"][0]
+            self.rect = self.image.get_rect(midbottom=(int(screen_width * self.x_ratio), floor))
+
+  
+        def handle_input(self, dt, screen_height, screen_width):
+            if ko_triggered or self.stunned:
+                return
+            keys = pg.key.get_pressed()
+            floor = int(screen_height * 0.85)            
+            
+            if not self.dashing:
+                if keys[self.controls["left"]]:
+                    self.rect.x -= self.speed * dt
+                    self.facing = "left"
+                if keys[self.controls["right"]]:
+                    self.rect.x += self.speed * dt
+                    self.facing = "right"
+            # keep player inside screen (restores "walls")
+            if self.rect.left < 0:
+                self.rect.left = 0
+            if self.rect.right > screen_width:
+                self.rect.right = screen_width
+        
+            JUMP_VELOCITY_RATIO = -0.036 
+            JUMP_VELOCITY = screen_height * JUMP_VELOCITY_RATIO
+            
+            wall_touch = None
+            if self.rect.left <= 0:
+                wall_touch = "left"
+            elif self.rect.right >= screen_width:
+                wall_touch = "right"
+
+            # Jumping + wall jump
+            if keys[self.controls["jump"]]:
+                if not self.jump_pressed:
+                    if self.jump_count < self.max_jumps:
+                        self.gravity = JUMP_VELOCITY
+                        self.jump_count += 1
+
+                        if self.jump_count == 2:
+                            self.double_jump_timer = self.double_jump_duration
+
+                    elif wall_touch:
+                        self.gravity = JUMP_VELOCITY
+                        if wall_touch == "left":
+                            self.rect.x += int(0.1 * screen_width)
+                            self.facing = "right"
+                        else:
+                            self.rect.x -= int(0.1 * screen_width)
+                            self.facing = "left"
+                    self.jump_pressed = True
+            else:
+                self.jump_pressed = False
+
+            # Blocking 
+            if keys[self.controls["block"]]:  
+                self.blocking = self.block_stamina > 0
+            else:
+                self.blocking = False
+
+            if self.blocking:
+                self.block_stamina -= self.block_drain_rate * dt
+                if self.block_stamina < 0:
+                    self.block_stamina = 0
+                    self.blocking = False
+            else:
+                self.block_stamina += self.block_recover_rate * dt
+                if self.block_stamina > self.max_block_stamina:
+                    self.block_stamina = self.max_block_stamina
+
+            # BasicAttack
+            if keys[self.controls["attack"]] and not self.attacking and not self.blocking:
+                self.start_attack(screen_height)
+            
+            if (keys[self.controls["special"]] and
+                self.special_attack >= self.special_cost and
+                self.can_special and not self.attacking and not self.blocking):
+                self.start_special(screen_width)
+
+            if self.flying:
+                keys = pg.key.get_pressed()
+
+                if keys[self.controls["left"]]:
+                    self.rect.x -= self.fly_speed * dt
+                if keys[self.controls["right"]]:
+                    self.rect.x += self.fly_speed * dt
+                if keys[self.controls["jump"]]:
+                    self.rect.y -= self.fly_speed * dt
+                if keys[self.controls["block"]]:  # use block key to go down
+                    self.rect.y += self.fly_speed * dt
+
+
+
+
+
+
+
+                # Clamp to screen
+                self.rect.left = max(0, self.rect.left)
+                self.rect.right = min(screen_width, self.rect.right)
+                self.rect.top = max(0, self.rect.top)
+                self.rect.bottom = min(screen_height, self.rect.bottom)
+
+                return
+
+        def apply_gravity(self, screen_height, screen_width=None):
+            if self.flying:
+                return
+
+            floor = int(screen_height * 0.85)
+            GRAVITY_ACCELERATION_RATIO = 0.002
+            GRAVITY_ACCELERATION = screen_height * GRAVITY_ACCELERATION_RATIO
+            WALL_SLIDE_SPEED_RATIO = 0.5
+
+            # Wall slide
+            wall_touch = self.is_touching_wall(screen_width) if screen_width else None
+
+            # SNAP to wall while airborne so climb doesn't float
+            if wall_touch and self.is_airborne(screen_height):
+                if wall_touch == "left":
+                    self.rect.left = 0
+                    self.facing = "right"   # optional: face away from wall
+                elif wall_touch == "right":
+                    self.rect.right = screen_width
+                    self.facing = "left"            
+                self.gravity = min(self.gravity, GRAVITY_ACCELERATION / WALL_SLIDE_SPEED_RATIO)
+
+            # Apply gravity
+            self.gravity += GRAVITY_ACCELERATION
+            self.rect.y += self.gravity
+
+            # Floor collision
+            if self.rect.bottom >= floor:
+                self.rect.bottom = floor
+                self.gravity = 0
+                self.jump_count = 0
+
+            # Knockback movement
+            if self.knockback_velocity != 0:
+                self.rect.x += self.knockback_velocity
+                self.knockback_velocity *= 0.85
+                if abs(self.knockback_velocity) < 1:
+                    self.knockback_velocity = 0
+
+            # Stun timer
+            if self.stunned:
+                self.stun_timer -= 1 / 60
+                if self.stun_timer <= 0:
+                    self.stunned = False
+
+        def start_attack(self, screen_height):
+            self.attack_type = "normal"
+            self.attacking = True
+            self.attack_timer = 0.2
+            w, h = self.rect.width, self.rect.height
+            keys = pg.key.get_pressed()
+            up_attack = keys[self.controls["jump"]]
+            airborne = self.is_airborne(screen_height)
+
+            if up_attack:
+                if airborne:
+                    self.active_hitbox = pg.Rect(self.rect.centerx - 0.2*w, self.rect.top - 0.5*h, 0.4*w, 0.5*h)
+                else:
+                    self.active_hitbox = pg.Rect(self.rect.centerx - 0.25*w, self.rect.top - 0.4*h, 0.5*w, 0.4*h)
+            else:
+                if self.facing == "right":
+                    self.active_hitbox = pg.Rect(self.rect.right, self.rect.top + 0.2*h, 0.35*w, 0.6*h)
+                else:
+                    self.active_hitbox = pg.Rect(self.rect.left - 0.35*w, self.rect.top + 0.2*h, 0.35*w, 0.6*h)
+            self.hit_opponents = []
+
+        def start_special(self, screen_width):
+            self.special_attack -= self.special_cost
+            self.can_special = False
+            self.special_cooldown_timer = self.special_cooldown_time
+            self.last_attack_was_special = True
+
+            if self.typeofspecial == "joker":
+                chosen = self.joker_current
+            else:
+                chosen = self.typeofspecial
+
+            if chosen == "fireball":
+                self.attack_type = "fireball"
+                start_x = self.rect.centerx
+                start_y = self.rect.centery - 10 
+                fireball = Fireball(start_x, start_y, self.facing, FIREBALL_COLOR, screen_width)
+                fireball.owner = self
+                all_sprites.add(fireball)
+                fireballs.add(fireball)
+
+            if chosen == "dash":
+                self.attack_type = "dash"
+                self.dashing = True
+                self.dash_timer = self.dash_time
+                self.dash_charges = self.max_dash_charges
+                self.dash_hit_this_dash = False
+                self.hit_opponents =[]
+
+            if chosen == "heal":
+                if self.health == self.max_health and self.special_attack >= self.max_special - self.special_cost:
+                    self.flying = True
+                    self.fly_timer = self.fly_duration
+                else:
+                    self.health += 20
+                    if self.health > self.max_health:
+                        self.health = self.max_health
+
+
+            if chosen == "shockwave":
+                self.attack_type = "shockwave"
+                w, h = self.rect.width, self.rect.height
+                shockwave_radius = max(w, h) * 1.85
+                self.active_hitbox = pg.Rect(self.rect.centerx - shockwave_radius/2, self.rect.centery - shockwave_radius/2, shockwave_radius, shockwave_radius)
+                self.attacking = True
+                self.attack_timer = 0.3
+                self.hit_opponents = []
+            
+            if self.typeofspecial == "joker":
+                self.joker_index += 1
+                if self.joker_index >= len(self.joker_deck):
+                    self.joker_index = 0  # looping
+                self.joker_current = self.joker_deck[self.joker_index]
+        
+        def update_attack(self, dt):
+            if self.attacking:
+                self.attack_timer -= dt
+                if self.attack_timer <= 0:
+                    self.attacking = False
+                    self.active_hitbox = None
+                    self.hit_opponents = []
+            if not self.can_special:
+                self.special_cooldown_timer -= dt
+                if self.special_cooldown_timer <= 0:
+                    self.can_special = True
+
+        def gain_special(self, amount):
+            self.special_attack += amount
+            if self.special_attack > self.max_special:
+                self.special_attack = self.max_special
+
+        def deal_damage(self, amount):
+            if self.dead:
+                return
+            
+            self.health -= amount
+            if self.health <= 0:
+                self.health = 0
+                self.dead = True
+                self.attacking = False
+                self.blocking = False
+                self.active_hitbox = None
+            self.gain_special(amount * 0.5) 
+
+        def update(self, dt, screen_width, screen_height):
+            keys = pg.key.get_pressed()
+            self.handle_input(dt, screen_height, screen_width)
+            
+            if self.dead or ko_triggered:
+                # still let gravity settle them onto the floor if you want:
+                self.apply_gravity(screen_height, screen_width)
+
+                new_animation = "death" if self.dead else "idle"
+
+                if new_animation != self.current_animation:
+                    self.current_animation = new_animation
+                    self.frame_index = 0
+                    self.animation_timer = 0
+
+                self.update_animation(dt)
+                return
+            
+            if self.double_jump_timer > 0:
+                self.double_jump_timer -= dt
+
+            if self.attacking:
+                new_animation = "attack1"
+            elif self.stunned:
+                new_animation = "hurt"
+            
+            elif self.is_airborne(screen_height) and self.is_touching_wall(screen_width):
+                new_animation = "climb"
+
+            elif self.is_airborne(screen_height):
+                if self.double_jump_timer > 0:
+                    new_animation = "double_jump"
+                else:
+                    new_animation = "jump"
+
+            elif keys[self.controls["left"]] or keys[self.controls["right"]]:
+                new_animation = "run"
+            else:
+                new_animation = "idle"
+
+            # RESET frame index when animation changes
+            if new_animation != self.current_animation:
+                self.current_animation = new_animation
+                self.frame_index = 0
+                self.animation_timer = 0
+            
+            if self.dashing:
+                direction = 1 if self.facing == "right" else -1
+                self.rect.x += direction * self.dash_speed * dt
+                self.dash_timer -= dt
+                if self.rect.left < 0:
+                    self.rect.left = 0
+                if self.rect.right > screen_width:
+                    self.rect.right = screen_width
+                self.active_hitbox = pg.Rect(
+                    min(self.rect.centerx, self.rect.centerx + direction * self.dash_speed * dt),
+                    self.rect.top,
+                    self.rect.width * 0.6 + self.dash_speed * dt,
+                    self.rect.height
+                )
+
+                # Dash trail effect
+                trail_surf = self.image.copy()
+                trail_surf.fill((255,255,255), special_flags=pg.BLEND_RGB_ADD)
+                trail_rect = trail_surf.get_rect(center=self.rect.center)
+                self.dash_trail.append([trail_surf, trail_rect, 180])
+
+                if len(self.dash_trail) > self.dash_trail_max:
+                    self.dash_trail.pop(0)
+
+                if self.dash_timer <= 0:
+                    self.dashing = False
+                    self.active_hitbox = None
+                    self.dash_hit_this_dash = False
+                    self.hit_opponents = []
+
+            if not self.dashing and self.attack_type == "dash":
+                self.attack_type = "normal"
+
+
+            self.apply_gravity(screen_height, screen_width)
+            self.update_attack(dt)
+            self.display_health += (self.health - self.display_health) * 0.12
+
+            for trail in self.dash_trail:
+                trail[2] -= 600 * dt  # fade speed
+            self.dash_trail = [t for t in self.dash_trail if t[2] > 0]  # remove invisible
+
+            # Draw trail
+            for trail_surf, trail_rect, alpha in self.dash_trail:
+                surf = trail_surf.copy()
+                surf.set_alpha(int(alpha))
+                screen.blit(surf, trail_rect)
+
+            # Fly timer
+            if self.flying:
+                self.fly_timer -= dt
+                if self.fly_timer <= 0:
+                    self.flying = False
+                    self.gravity = 0
+            if self.flying:
+                aura = pg.Surface((self.rect.width + 10, self.rect.height + 10),pg.SRCALPHA)
+                pg.draw.rect(aura, (150, 200, 255, 80), aura.get_rect(), border_radius=20)
+                screen.blit(aura, (self.rect.x - 5, self.rect.y - 5))
+            
+            self.update_animation(dt)
+
+        def is_airborne(self, screen_height):
+            floor = int(screen_height * 0.85)
+            return self.rect.bottom < floor - 5
+                    
+        def is_touching_wall(self, screen_width):
+            if self.rect.left <= 0:
+                return "left"
+            elif self.rect.right >= screen_width:
+                return "right"
+            return None
+
+
+    # --- Game Setup ---
+    player1 = Player(0.2, PLAYER1_COLOR,
+        {"left": pg.K_a, "right": pg.K_d, "jump": pg.K_w, "attack": pg.K_e, "special": pg.K_r, "block": pg.K_t},p1_special)
+
+    player2 = Player(0.8, PLAYER2_COLOR,
+        {"left": pg.K_LEFT, "right": pg.K_RIGHT, "jump": pg.K_UP, "attack": pg.K_KP1, "special": pg.K_KP2, "block": pg.K_KP3},p2_special)
+
+    player1.animations = ALL_CHARACTER_ANIMATIONS[player1_sprite]
+    player2.animations = ALL_CHARACTER_ANIMATIONS[player2_sprite]
+
+    player1.current_animation = "idle"
+    player2.current_animation = "idle"
+
+    player1.frame_index = 0
+    player2.frame_index = 0
+
+    player1.image = player1.animations["idle"][0]
+    player2.image = player2.animations["idle"][0]
+
+    player1.rect = player1.image.get_rect(midbottom=(int(width * player1.x_ratio), int(0.8 * height)))
+    player2.rect = player2.image.get_rect(midbottom=(int(width * player2.x_ratio), int(0.8 * height)))
+
+
+    player1.initial_setup(initial_width, initial_height)
+    player2.initial_setup(initial_width, initial_height)
+
+    players = pg.sprite.Group(player1, player2)
+    all_sprites.add(player1, player2)
+
+
+    player1.current_animation = "idle"
+    player2.current_animation = "idle"
+
+    player1.image = player1.animations["idle"][0]
+    player2.image = player2.animations["idle"][0]
+
+    def draw_block_shield(surface, player):
+        if player.blocking:
+            w, h = player.rect.width, player.rect.height
+            
+            shield_w = int(w * 2.1)
+            shield_h = int(h * 1.3)
+            
+            shield_surface = pg.Surface((shield_w, shield_h), pg.SRCALPHA)
+            
+            ellipse_rect = shield_surface.get_rect()
+            
+            pg.draw.ellipse(shield_surface, BLOCK_SHIELD_COLOR, ellipse_rect)
+            
+            shield_rect = shield_surface.get_rect(center=player.rect.center)
+            
+            surface.blit(shield_surface, shield_rect)
+
+    def reset_game():
+        nonlocal ko_triggered, ko_y
+
+        ko_triggered = False
+        ko_timer = 0.0
+        ko_y = -200
+
+        player1.dead = False
+        player2.dead = False
+
+        player1.current_animation = "idle"
+        player2.current_animation = "idle"
+        player1.frame_index = 0
+        player2.frame_index = 0
+        player1.animation_timer = 0
+        player2.animation_timer = 0 
+
+        player1.health = 100
+        player2.health = 100
+
+        player1.special_attack = 100
+        player2.special_attack = 100
+
+        player1.block_stamina = player1.max_block_stamina
+        player2.block_stamina = player2.max_block_stamina
+
+        player1.rect.midbottom = (int(width * player1.x_ratio), int(0.8 * height))
+        player2.rect.midbottom = (int(width * player2.x_ratio), int(0.8 * height))
+
+        player1.gravity = 0
+        player2.gravity = 0
+
+        player1.attacking = False
+        player2.attacking = False
+
+        player1.active_hitbox = None
+        player2.active_hitbox = None
+
+        player1.facing = "right"
+        player2.facing = "left"
+
+
+        player1.stunned = False
+        player2.stunned = False
+        player1.combo_count = 0
+        player2.combo_count = 0
+        player1.knockback_velocity = 0
+        player2.knockback_velocity = 0
+
+
+        for f in fireballs:
+            f.kill()
+
+    def draw_bars(surface, width, height, player1, player2):
+        bar_height = 0.05 * height
+        seg_width = int(width * 0.03)
+        special_segments = 3
+        block_bar_height = bar_height / 2
+        spacing = 5
+        
+        pg.draw.rect(surface, (60, 60, 60), (0, 0, width * 0.35, bar_height))
+        pg.draw.rect(surface, (230, 230, 230), (0, 0, (width*0.35) * (player1.display_health/player1.max_health), bar_height))
+        color_hp1 = PLAYER1_COLOR if player1.health/player1.max_health >= 0.3 else (255, 80, 80)
+        pg.draw.rect(surface, color_hp1, (0, 0, (width*0.35) * (player1.health/player1.max_health), bar_height))
+
+        bar_y_special = bar_height + spacing
+        special_bar_width = seg_width * special_segments
+        bar_x = 0
+        pg.draw.rect(surface, (50,0,50), (bar_x, bar_y_special, special_bar_width, bar_height))
+        filled_width = special_bar_width * (player1.special_attack/player1.max_special)
+        pg.draw.rect(surface, PLAYER1_COLOR, (bar_x, bar_y_special, filled_width, bar_height))
+        for j in range(1, special_segments):
+            line_x = bar_x + j * seg_width
+            pg.draw.line(surface, (255,255,255), (line_x, bar_y_special), (line_x, bar_y_special+bar_height), 2)
+
+        bar_y_block = bar_y_special + bar_height + spacing
+        block_bar_width = seg_width * 3
+        bar_x = 0
+        pg.draw.rect(surface, (20,20,70), (bar_x, bar_y_block, block_bar_width, block_bar_height))
+        filled_width = block_bar_width * (player1.block_stamina/player1.max_block_stamina)
+        pg.draw.rect(surface, (0,200,255), (bar_x, bar_y_block, filled_width, block_bar_height))
+
+        bar_width_p2 = width * 0.35
+        pg.draw.rect(surface, (60,60,60), (width - bar_width_p2, 0, bar_width_p2, bar_height))
+        chip_width = bar_width_p2 * (player2.display_health/player2.max_health)
+        pg.draw.rect(surface, (230,230,230), (width - bar_width_p2 + bar_width_p2 - chip_width, 0, chip_width, bar_height))
+        real_width = bar_width_p2 * (player2.health/player2.max_health)
+        color_hp2 = PLAYER2_COLOR if player2.health/player2.max_health >= 0.3 else (255,80,80)
+        pg.draw.rect(surface, color_hp2, (width - bar_width_p2 + bar_width_p2 - real_width, 0, real_width, bar_height))
+
+        bar_y_special = bar_height + spacing
+        special_bar_width = seg_width * special_segments
+        bar_x = width - special_bar_width
+        pg.draw.rect(surface, (50,0,50), (bar_x, bar_y_special, special_bar_width, bar_height))
+        filled_width = special_bar_width * (player2.special_attack/player2.max_special)
+        pg.draw.rect(surface, PLAYER2_COLOR, (bar_x + special_bar_width - filled_width, bar_y_special, filled_width, bar_height))
+        for j in range(1, special_segments):
+            line_x = bar_x + j * seg_width
+            pg.draw.line(surface, (255,255,255), (line_x, bar_y_special), (line_x, bar_y_special+bar_height), 2)
+
+        bar_y_block = bar_y_special + bar_height + spacing
+        block_bar_width = seg_width * 3
+        bar_x = width - block_bar_width
+        pg.draw.rect(surface, (20,20,70), (bar_x, bar_y_block, block_bar_width, block_bar_height))
+        filled_width = block_bar_width * (player2.block_stamina/player2.max_block_stamina)
+        pg.draw.rect(surface, (0,200,255), (bar_x + block_bar_width - filled_width, bar_y_block, filled_width, block_bar_height))
+
+    loop_variable = True
+    while loop_variable:
+        dt = clock.tick(60) / 1000
+        width, height = screen.get_size()
+
+        for event in pg.event.get():
+            if event.type == pg.QUIT:
+                loop_variable = False
+            if event.type == pg.KEYDOWN:
+                if event.key == pg.K_f:
+                    fullscreen = not fullscreen
+                    if fullscreen:
+                        screen = pg.display.set_mode((0, 0), pg.FULLSCREEN)
+                if event.key == pg.K_ESCAPE:
+                    loop_variable = False
+            if ko_triggered and event.type == pg.MOUSEBUTTONDOWN:
+                if replay_rect.collidepoint(event.pos):
+                    reset_game()
+        
+        if background_image:
+            screen.blit(background_image, (0, 0))
+        else:
+            screen.fill(BG_COLOR)
+            
+        def handle_attack(attacker, defender):
+            now = pg.time.get_ticks() / 1000
+
+            if attacker.attack_type == "dash" and attacker.dashing and attacker.active_hitbox:
+                if attacker.active_hitbox.colliderect(defender.rect) and defender not in attacker.hit_opponents:
+                    defender.deal_damage(30)
+                    defender.stunned = True
+                    defender.stun_timer = 0.4
+                    defender.knockback_velocity = 15 if attacker.facing == "right" else -15
+
+                    attacker.hit_opponents.append(defender)
+                    attacker.dash_hit_this_dash = True
+                return  
+
+            if attacker.active_hitbox and attacker.active_hitbox.colliderect(defender.rect) and defender not in attacker.hit_opponents:
+
+                # Combo reset
+                if now - attacker.last_hit_time > attacker.combo_reset_time:
+                    attacker.combo_count = 0
+
+                attacker.combo_count += 1
+                attacker.last_hit_time = now
+                attacker.hit_opponents.append(defender)
+
+                damage = 5 
+
+                # damage based on height
+                if attacker.attack_type == "shockwave":
+                    floor = 0.8 * height
+                    height_above_ground = max(0, floor - attacker.rect.bottom)
+                    damage = attacker.shockwave_base_damage + height_above_ground * attacker.shockwave_height_multiplier
+
+                # Apply damage if not blocking
+                if not defender.blocking:
+                    defender.deal_damage(damage)
+
+                # Special gain
+                attacker.gain_special(damage * 1.5)
+                defender.gain_special(damage * 0.5)
+
+                # Stun on combo
+                if attacker.combo_count >= 4:
+                    defender.stunned = True
+                    defender.stun_timer = 0.7
+                    defender.knockback_velocity = 18 if attacker.facing == "right" else -18
+                    attacker.combo_count = 0
+        players.update(dt, width, height) 
+
+        if not ko_triggered:
+        
+            # Update fireballs 
+            fireballs.update(dt) 
+
+            player1.gain_special(10 * dt)
+            player2.gain_special(10 * dt)
+            
+            # Basic Attack 
+            handle_attack(player1, player2)
+            handle_attack(player2, player1)
+
+                # Fireball collisions
+            for fireball in fireballs:
+                if fireball.owner != player1 and fireball.rect.colliderect(player1.rect):
+
+                    attacker = fireball.owner
+                    defender = player1
+                    now = pg.time.get_ticks() / 1000
+
+                    # Combo timing
+                    if now - attacker.last_hit_time > attacker.combo_reset_time:
+                        attacker.combo_count = 0
+
+                    attacker.combo_count += 1
+                    attacker.last_hit_time = now
+
+                    if not defender.blocking:
+                        defender.deal_damage(fireball.damage)
+
+                    attacker.gain_special(fireball.damage * 1.5)
+                    defender.gain_special(fireball.damage * 0.5)
+
+                    # SPECIAL FINISHER KNOCKBACK
+                    if attacker.combo_count >= 4:
+                        defender.stunned = True
+                        defender.stun_timer = 0.9
+                        defender.knockback_velocity = 35 if attacker.facing == "right" else -35
+                        attacker.combo_count = 0
+
+                    fireball.kill()
+
+
+                elif fireball.owner != player2 and fireball.rect.colliderect(player2.rect):
+
+                    attacker = fireball.owner
+                    defender = player2
+                    now = pg.time.get_ticks() / 1000
+
+                    if now - attacker.last_hit_time > attacker.combo_reset_time:
+                        attacker.combo_count = 0
+
+                    attacker.combo_count += 1
+                    attacker.last_hit_time = now
+
+                    if not defender.blocking:
+                        defender.deal_damage(fireball.damage)
+
+                    attacker.gain_special(fireball.damage * 1.5)
+                    defender.gain_special(fireball.damage * 0.5)
+
+                    if attacker.combo_count >= 4:
+                        defender.stunned = True
+                        defender.stun_timer = 0.9
+                        defender.knockback_velocity = 35 if attacker.facing == "right" else -35
+                        attacker.combo_count = 0
+
+                    fireball.kill()
+
+        all_sprites.draw(screen) 
+
+        draw_block_shield(screen, player1)
+        draw_block_shield(screen, player2)
+
+        if player1.active_hitbox:
+            pg.draw.rect(screen, PLAYER1_COLOR, player1.active_hitbox, 2)
+        if player2.active_hitbox:
+            pg.draw.rect(screen, PLAYER2_COLOR, player2.active_hitbox, 2)
+
+        draw_bars(screen, width, height, player1, player2)
+
+        #KO
+        if not ko_triggered and (player1.health <= 0 or player2.health <= 0):
+            ko_triggered = True
+            ko_y = -0.4 * height
+
+        if ko_triggered:
+            ko_y += 600 * dt
+        if ko_y > 0.3 * height:
+            ko_y = 0.3 * height
+
+        if ko_triggered:
+            try:
+                ko_font = pg.font.Font("ARCADECLASSIC.ttf", int(0.33*height))
+            except:
+                ko_font = pg.font.SysFont("Arial", int(0.25*height), bold=True)
+
+            winner_font = pg.font.SysFont("Arial", int(0.12*height), bold=True)
+            ko_text_str = "KO"
+            main_color = (255, 255, 255) 
+            
+            # Draw background splatter for effect
+            ko_text_str = "KO"
+            ko_main = ko_font.render(ko_text_str, True, (255, 255, 255))
+            ko_rect = ko_main.get_rect(center=(width // 2, int(ko_y)))
+
+            # --- SPLATTER / SPRAY LAYERS ---
+          # --- OLD SPLATTER (same style as before) ---
+            for _ in range(15):
+                offset_x = r.randint(-15, 15)
+                offset_y = r.randint(-5, 5)
+                splatter = ko_font.render(ko_text_str, True, (230, 230, 230))
+                splatter_rect = splatter.get_rect(center=(width//2 + offset_x, int(ko_y) + offset_y))
+                screen.blit(splatter, splatter_rect)
+            screen.blit(ko_main, ko_rect)
+
+
+            # Draw Winner text
+            winner_text_str = "WINNER PLAYER 2" if player1.health <= 0 else "WINNER PLAYER 1"
+            winner_color = PLAYER2_COLOR if player1.health <= 0 else PLAYER1_COLOR
+            winner_text = winner_font.render(winner_text_str, True, winner_color)
+            winner_rect = winner_text.get_rect(center=(width//2, int(ko_y + 0.15*height)))
+            screen.blit(winner_text, winner_rect)
+
+            # Draw replay button
+            button_width = width * 0.25
+            button_height = height * 0.1
+            button_x = width//2 - button_width//2
+            button_y = int(ko_y + 0.30 * height)
+
+            replay_rect = pg.Rect(button_x, button_y, button_width, button_height)
+            pg.draw.rect(screen, (200,200,200), replay_rect, border_radius=10)
+            font = pg.font.SysFont("Arial", int(0.07 * height), bold=True)
+            text = font.render("REPLAY", True, (255, 255, 255))
+            text_rect = text.get_rect(center=replay_rect.center)
+            screen.blit(text, text_rect)
+            
+            
+        
+
+        pg.display.update()
+
+if __name__ == "__main__":
+    main_menu()
+    pg.quit()
+    sys.exit()
