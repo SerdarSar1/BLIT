@@ -299,6 +299,9 @@ CHAR_SPECIAL = {
     # if you add a 4th/5th character later:
     # "SomeCharacter": "heal",
     # "SomeOther": "joker",
+    #"Pink_Monster": "shockwave",
+    #"Owl_Monster": "dash",
+    #"Dude_Monster": "heal",
 }
 pink_preview = pink_animations["idle"][0]
 owl_preview = owl_animations["idle"][0]
@@ -982,7 +985,7 @@ class OnlineServer(threading.Thread):
             "specialCD": 0.0,
             "specialCDTime": 0.5,
             "typeofspecial": typeofspecial,
-
+            "jumpPressed": False,
             # animation synced to clients
             "anim": "idle",
             "frame": 0,
@@ -1044,9 +1047,9 @@ class OnlineServer(threading.Thread):
             hb = pg.Rect(r.centerx - int(0.2*w), r.top - int(0.5*h), int(0.4*w), int(0.5*h))
         else:
             if p["facing"] == "right":
-                hb = pg.Rect(r.right, r.top + int(0.2*h), int(0.35*w), int(0.6*h))
+                hb = pg.Rect(r.right, r.top + int(0.2*h), int(0.15*w), int(0.6*h))
             else:
-                hb = pg.Rect(r.left - int(0.35*w), r.top + int(0.2*h), int(0.35*w), int(0.6*h))
+                hb = pg.Rect(r.left - int(0.35*w), r.top + int(0.2*h), int(0.15*w), int(0.6*h))
         p["hitbox"] = hb
         p["hitOpponents"] = set()
 
@@ -1094,7 +1097,7 @@ class OnlineServer(threading.Thread):
         if p["dashing"]:
             return "run" 
         if p["attacking"]:
-            return "attack1"
+            return "attack2"
         if p["stunned"]:
             return "hurt"
         if self.is_airborne(p):
@@ -1373,18 +1376,6 @@ class OnlineServer(threading.Thread):
 
         self.sock.close()
 
-def run_online_host(p1_char, p2_char, background_surface, p1_special, p2_special):
-    # background_surface is already your chosen full-screen background
-    # pick a bg_index so joiner can draw same if they have same bg list (optional)
-    bg_index = 0
-    server = OnlineServer(p1_char, p2_char, bg_index, p1_special, p2_special)
-    server.start()
-
-    # host connects to itself as player 1
-    run_online_client("127.0.0.1", player_id=1, forced_bg=background_surface)
-
-    server.running = False
-
 def run_online_client(server_ip, player_id, forced_bg=None, chosen_char=None):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setblocking(False)
@@ -1498,7 +1489,9 @@ def run_online_client(server_ip, player_id, forced_bg=None, chosen_char=None):
         if forced_bg is not None:
             screen.blit(forced_bg, (0,0))
         else:
-            screen.fill((30,30,30))
+            idx = int(s.get("bg_index", 0))
+            idx = max(0, min(idx, len(BG_FULL_LIST) - 1))
+            screen.blit(BG_FULL_LIST[idx], (0,0))
 
         # scale sim->screen
         sim_w = s["sim"]["w"]
@@ -2048,7 +2041,7 @@ def run_game(player1_sprite, player2_sprite, background_image, p1_special, p2_sp
                 self.double_jump_timer -= dt
 
             if self.attacking:
-                new_animation = "attack1"
+                new_animation = "attack2"
             elif self.stunned:
                 new_animation = "hurt"
             
@@ -2168,8 +2161,8 @@ def run_game(player1_sprite, player2_sprite, background_image, p1_special, p2_sp
     player2.rect = player2.image.get_rect(midbottom=(int(width * player2.x_ratio), int(0.8 * height)))
 
 
-    player1.initial_setup(initial_width, initial_height)
-    player2.initial_setup(initial_width, initial_height)
+    player1.initial_setup(width, height)
+    player2.initial_setup(width, height)
 
     players = pg.sprite.Group(player1, player2)
     all_sprites.add(player1, player2)
@@ -3533,9 +3526,9 @@ class OnlineServer(threading.Thread):
             hb = pg.Rect(r.centerx - int(0.2*w), r.top - int(0.5*h), int(0.4*w), int(0.5*h))
         else:
             if p["facing"] == "right":
-                hb = pg.Rect(r.right, r.top + int(0.2*h), int(0.35*w), int(0.6*h))
+                hb = pg.Rect(r.right, r.top + int(0.2*h), int(0.15*w), int(0.6*h))
             else:
-                hb = pg.Rect(r.left - int(0.35*w), r.top + int(0.2*h), int(0.35*w), int(0.6*h))
+                hb = pg.Rect(r.left - int(0.35*w), r.top + int(0.2*h), int(0.15*w), int(0.6*h))
         p["hitbox"] = hb
         p["hitOpponents"] = set()
 
@@ -3581,7 +3574,7 @@ class OnlineServer(threading.Thread):
         if p["hp"] <= 0:
             return "death"
         if p["attacking"]:
-            return "attack1"
+            return "attack2"
         if p["stunned"]:
             return "hurt"
         if self.is_airborne(p):
@@ -4396,9 +4389,9 @@ def run_game(player1_sprite, player2_sprite, background_image, p1_special, p2_sp
                     self.active_hitbox = pg.Rect(self.rect.centerx - 0.25*w, self.rect.top - 0.4*h, 0.5*w, 0.4*h)
             else:
                 if self.facing == "right":
-                    self.active_hitbox = pg.Rect(self.rect.right, self.rect.top + 0.2*h, 0.35*w, 0.6*h)
+                    self.active_hitbox = pg.Rect(self.rect.right, self.rect.top + 0.2*h, 0.15*w, 0.6*h)
                 else:
-                    self.active_hitbox = pg.Rect(self.rect.left - 0.35*w, self.rect.top + 0.2*h, 0.35*w, 0.6*h)
+                    self.active_hitbox = pg.Rect(self.rect.left - 0.35*w, self.rect.top + 0.2*h, 0.15*w, 0.6*h)
             self.hit_opponents = []
 
         def start_special(self, screen_width):
@@ -4506,7 +4499,7 @@ def run_game(player1_sprite, player2_sprite, background_image, p1_special, p2_sp
                 self.double_jump_timer -= dt
 
             if self.attacking:
-                new_animation = "attack1"
+                new_animation = "attack2"
             elif self.stunned:
                 new_animation = "hurt"
             
@@ -4626,8 +4619,8 @@ def run_game(player1_sprite, player2_sprite, background_image, p1_special, p2_sp
     player2.rect = player2.image.get_rect(midbottom=(int(width * player2.x_ratio), int(0.8 * height)))
 
 
-    player1.initial_setup(initial_width, initial_height)
-    player2.initial_setup(initial_width, initial_height)
+    player1.initial_setup(width, height)
+    player2.initial_setup(width,height)
 
     players = pg.sprite.Group(player1, player2)
     all_sprites.add(player1, player2)
@@ -4972,9 +4965,6 @@ def run_game(player1_sprite, player2_sprite, background_image, p1_special, p2_sp
             text_rect = text.get_rect(center=replay_rect.center)
             screen.blit(text, text_rect)
             
-            
-        
-
         pg.display.update()
 
 if __name__ == "__main__":
