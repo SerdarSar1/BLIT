@@ -2512,11 +2512,6 @@ def run_game(player1_sprite, player2_sprite, background_image, p1_special, p2_sp
 
         pg.display.update()
 
-if __name__ == "__main__":
-    main_menu()
-    pg.quit()
-    sys.exit()
-
 def get_lan_ip():
     """
     Best-effort LAN IP (the one your friend on the same Wi-Fi can use).
