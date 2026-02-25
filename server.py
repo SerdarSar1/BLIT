@@ -38,7 +38,7 @@ player_inputs = {
     2: {"left":0,"right":0,"jump":0,"attack":0,"block":0,"special":0},
 }
 
-# ---------------- Game constants & globals (kept from your code) ----------------
+# ---------------- Game constants & globals ----------------
 BG_COLOR = (30, 30, 30)
 PLAYER1_COLOR = (255, 0, 0)
 PLAYER2_COLOR = (0, 0, 255)
@@ -59,7 +59,7 @@ fireballs = pg.sprite.Group()
 ko_triggered = False
 ko_y = -200
 
-# ---------------- Classes (your logic, with only minimal headless adjustments) ----------------
+# ---------------- Classes ----------------
 class Fireball(pg.sprite.Sprite):
     def __init__(self, start_x, start_y, direction, color, screen_width):
         super().__init__()
@@ -672,4 +672,5 @@ except KeyboardInterrupt:
     print("\n[SERVER] Shutting down.")
 finally:
     sock.close()
+
     pg.quit()
